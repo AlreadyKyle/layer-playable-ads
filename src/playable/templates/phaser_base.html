@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>${TITLE}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: ${BACKGROUND_COLOR};
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #game-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        canvas {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <!-- Phaser 3 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+
+    <!-- MRAID Detection & Handler -->
+    <script>
+        // MRAID 3.0 Support
+        var mraid = window.mraid || null;
+        var isMRAID = !!mraid;
+        var isReady = false;
+
+        // Store URL for CTA
+        var STORE_URL = '${STORE_URL}';
+
+        // Timing constants (milliseconds)
+        var HOOK_DURATION = ${HOOK_DURATION};
+        var GAMEPLAY_DURATION = ${GAMEPLAY_DURATION};
+        var CTA_DURATION = ${CTA_DURATION};
+
+        // Asset manifest for reference
+        var ASSET_MANIFEST = ${ASSET_MANIFEST};
+
+        function openStoreUrl() {
+            if (isMRAID && mraid.open) {
+                mraid.open(STORE_URL);
+            } else {
+                window.open(STORE_URL, '_blank');
+            }
+        }
+
+        function mraidReady() {
+            if (isMRAID) {
+                if (mraid.getState() === 'loading') {
+                    mraid.addEventListener('ready', function() {
+                        isReady = true;
+                        startGame();
+                    });
+                } else {
+                    isReady = true;
+                    startGame();
+                }
+            } else {
+                isReady = true;
+                startGame();
+            }
+        }
+
+        // Wait for DOM and MRAID
+        if (document.readyState === 'complete') {
+            mraidReady();
+        } else {
+            window.addEventListener('load', mraidReady);
+        }
+    </script>
+
+    <!-- Game Logic -->
+    <script>
+        var game = null;
+
+        function startGame() {
+            if (game) return;
+
+            var config = {
+                type: Phaser.AUTO,
+                parent: 'game-container',
+                width: ${WIDTH},
+                height: ${HEIGHT},
+                backgroundColor: '${BACKGROUND_COLOR}',
+                scale: {
+                    mode: Phaser.Scale.FIT,
+                    autoCenter: Phaser.Scale.CENTER_BOTH
+                },
+                scene: [BootScene, HookScene, GameplayScene, CTAScene]
+            };
+
+            game = new Phaser.Game(config);
+        }
+
+        // =====================================================================
+        // Boot Scene - Asset Loading
+        // =====================================================================
+        class BootScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'BootScene' });
+            }
+
+            preload() {
+                // Show loading progress
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+
+                var progressBar = this.add.graphics();
+                var progressBox = this.add.graphics();
+                progressBox.fillStyle(0x222222, 0.8);
+                progressBox.fillRect(width / 4, height / 2 - 15, width / 2, 30);
+
+                this.load.on('progress', function(value) {
+                    progressBar.clear();
+                    progressBar.fillStyle(0x00ff00, 1);
+                    progressBar.fillRect(width / 4 + 5, height / 2 - 10, (width / 2 - 10) * value, 20);
+                });
+
+                this.load.on('complete', function() {
+                    progressBar.destroy();
+                    progressBox.destroy();
+                });
+
+                // Load embedded assets
+${ASSET_LOADER}
+            }
+
+            create() {
+                this.scene.start('HookScene');
+            }
+        }
+
+        // =====================================================================
+        // Hook Scene - 3 Second Attention Grabber
+        // =====================================================================
+        class HookScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'HookScene' });
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+
+                // Background
+                this.cameras.main.setBackgroundColor('${BACKGROUND_COLOR}');
+
+                // Try to use hook assets
+                var hookAssets = Object.keys(ASSET_MANIFEST).filter(function(k) {
+                    return k.startsWith('hook_');
+                });
+
+                if (hookAssets.length > 0) {
+                    var mainAsset = this.add.image(width / 2, height / 2, hookAssets[0]);
+                    this.scaleToFit(mainAsset, width * 0.8, height * 0.6);
+
+                    // Bounce animation
+                    this.tweens.add({
+                        targets: mainAsset,
+                        scaleX: mainAsset.scaleX * 1.1,
+                        scaleY: mainAsset.scaleY * 1.1,
+                        duration: 300,
+                        yoyo: true,
+                        repeat: 2,
+                        ease: 'Bounce.easeOut'
+                    });
+                }
+
+                // Hook text
+                var hookText = this.add.text(width / 2, height * 0.85, '${HOOK_TEXT}', {
+                    fontSize: '32px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 4
+                }).setOrigin(0.5);
+
+                // Pulse animation on text
+                this.tweens.add({
+                    targets: hookText,
+                    scale: 1.2,
+                    duration: 500,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Transition to gameplay after hook duration
+                this.time.delayedCall(HOOK_DURATION, function() {
+                    this.scene.start('GameplayScene');
+                }, [], this);
+
+                // Allow skip on tap
+                this.input.on('pointerdown', function() {
+                    this.scene.start('GameplayScene');
+                }, this);
+            }
+
+            scaleToFit(image, maxWidth, maxHeight) {
+                var scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // Gameplay Scene - 15 Second Core Loop
+        // =====================================================================
+        class GameplayScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameplayScene' });
+                this.interactionCount = 0;
+                this.collectibles = [];
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Background
+                var bgAssets = Object.keys(ASSET_MANIFEST).filter(function(k) {
+                    return k.startsWith('gameplay_') && ASSET_MANIFEST[k].category === 'gameplay';
+                });
+
+                if (bgAssets.length > 0) {
+                    var bg = this.add.image(width / 2, height / 2, bgAssets[0]);
+                    this.scaleToFit(bg, width, height);
+                }
+
+                // Create interactive elements
+                var elementAssets = Object.keys(ASSET_MANIFEST).filter(function(k) {
+                    return k.startsWith('gameplay_') && k !== bgAssets[0];
+                });
+
+                // Spawn collectibles
+                this.spawnCollectibles(elementAssets, width, height);
+
+                // Score display
+                this.scoreText = this.add.text(16, 16, 'Score: 0', {
+                    fontSize: '24px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 3
+                });
+
+                // Progress bar
+                this.progressBg = this.add.graphics();
+                this.progressBg.fillStyle(0x333333, 0.8);
+                this.progressBg.fillRect(width * 0.1, height - 30, width * 0.8, 10);
+
+                this.progressBar = this.add.graphics();
+
+                // Timer for gameplay
+                var startTime = this.time.now;
+                this.time.addEvent({
+                    delay: 100,
+                    callback: function() {
+                        var elapsed = this.time.now - startTime;
+                        var progress = Math.min(elapsed / GAMEPLAY_DURATION, 1);
+
+                        this.progressBar.clear();
+                        this.progressBar.fillStyle(0x00ff00, 1);
+                        this.progressBar.fillRect(width * 0.1, height - 30, (width * 0.8) * progress, 10);
+
+                        if (elapsed >= GAMEPLAY_DURATION) {
+                            this.scene.start('CTAScene');
+                        }
+                    },
+                    callbackScope: this,
+                    loop: true
+                });
+
+                // Tap anywhere to interact
+                this.input.on('pointerdown', function(pointer) {
+                    self.handleInteraction(pointer.x, pointer.y);
+                });
+            }
+
+            spawnCollectibles(assets, width, height) {
+                var self = this;
+                var assetKey = assets.length > 0 ? assets[0] : null;
+
+                // Spawn items periodically
+                this.time.addEvent({
+                    delay: 1500,
+                    callback: function() {
+                        var x = Phaser.Math.Between(50, width - 50);
+                        var y = Phaser.Math.Between(100, height - 100);
+
+                        var item;
+                        if (assetKey && this.textures.exists(assetKey)) {
+                            item = this.add.image(x, y, assetKey);
+                            this.scaleToFit(item, 60, 60);
+                        } else {
+                            // Fallback: create a colored circle
+                            item = this.add.circle(x, y, 25, 0xffff00);
+                        }
+
+                        item.setInteractive();
+                        item.setData('points', 10);
+
+                        // Float animation
+                        this.tweens.add({
+                            targets: item,
+                            y: y - 20,
+                            duration: 500,
+                            yoyo: true,
+                            repeat: -1
+                        });
+
+                        self.collectibles.push(item);
+
+                        // Auto-remove after 3 seconds
+                        this.time.delayedCall(3000, function() {
+                            var idx = self.collectibles.indexOf(item);
+                            if (idx > -1) {
+                                self.collectibles.splice(idx, 1);
+                                item.destroy();
+                            }
+                        });
+                    },
+                    callbackScope: this,
+                    repeat: 8
+                });
+            }
+
+            handleInteraction(x, y) {
+                var self = this;
+
+                // Check if tapped on a collectible
+                this.collectibles.forEach(function(item, index) {
+                    if (item && item.active) {
+                        var bounds = item.getBounds();
+                        if (bounds.contains(x, y)) {
+                            self.collectItem(item, index);
+                        }
+                    }
+                });
+
+                // Create tap effect
+                var circle = this.add.circle(x, y, 10, 0xffffff, 0.5);
+                this.tweens.add({
+                    targets: circle,
+                    scale: 3,
+                    alpha: 0,
+                    duration: 300,
+                    onComplete: function() {
+                        circle.destroy();
+                    }
+                });
+            }
+
+            collectItem(item, index) {
+                var points = item.getData('points') || 10;
+                this.interactionCount += points;
+                this.scoreText.setText('Score: ' + this.interactionCount);
+
+                // Pop effect
+                this.tweens.add({
+                    targets: item,
+                    scale: item.scale * 1.5,
+                    alpha: 0,
+                    duration: 200,
+                    onComplete: function() {
+                        item.destroy();
+                    }
+                });
+
+                this.collectibles.splice(index, 1);
+
+                // Score popup
+                var scorePopup = this.add.text(item.x, item.y, '+' + points, {
+                    fontSize: '20px',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 2
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: scorePopup,
+                    y: scorePopup.y - 50,
+                    alpha: 0,
+                    duration: 500,
+                    onComplete: function() {
+                        scorePopup.destroy();
+                    }
+                });
+            }
+
+            scaleToFit(image, maxWidth, maxHeight) {
+                var scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // CTA Scene - 5 Second Call to Action
+        // =====================================================================
+        class CTAScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'CTAScene' });
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Darken background
+                this.cameras.main.setBackgroundColor('#1a1a2e');
+
+                // CTA assets
+                var ctaAssets = Object.keys(ASSET_MANIFEST).filter(function(k) {
+                    return k.startsWith('cta_');
+                });
+
+                // Logo/Banner area
+                if (ctaAssets.length > 0) {
+                    var banner = this.add.image(width / 2, height * 0.35, ctaAssets[0]);
+                    this.scaleToFit(banner, width * 0.7, height * 0.25);
+                }
+
+                // CTA Text
+                var ctaText = this.add.text(width / 2, height * 0.55, '${CTA_TEXT}', {
+                    fontSize: '28px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Install button
+                var buttonWidth = width * 0.7;
+                var buttonHeight = 60;
+                var buttonY = height * 0.72;
+
+                // Button background
+                var button = this.add.graphics();
+                button.fillStyle(0x4CAF50, 1);
+                button.fillRoundedRect(
+                    width / 2 - buttonWidth / 2,
+                    buttonY - buttonHeight / 2,
+                    buttonWidth,
+                    buttonHeight,
+                    15
+                );
+
+                // Button text
+                var buttonText = this.add.text(width / 2, buttonY, 'INSTALL NOW - FREE', {
+                    fontSize: '22px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Make button interactive
+                var hitArea = this.add.rectangle(width / 2, buttonY, buttonWidth, buttonHeight, 0x000000, 0);
+                hitArea.setInteractive({ useHandCursor: true });
+
+                hitArea.on('pointerdown', function() {
+                    openStoreUrl();
+                });
+
+                // Pulse animation on button
+                this.tweens.add({
+                    targets: [button, buttonText, hitArea],
+                    scaleX: 1.05,
+                    scaleY: 1.05,
+                    duration: 500,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Tap anywhere else also goes to store
+                this.input.on('pointerdown', function(pointer) {
+                    // Small delay to let button click register first
+                    self.time.delayedCall(50, function() {
+                        openStoreUrl();
+                    });
+                });
+
+                // Auto-redirect after CTA duration
+                this.time.delayedCall(CTA_DURATION, function() {
+                    // Flash the button more urgently
+                    self.tweens.add({
+                        targets: [button, buttonText],
+                        alpha: 0.5,
+                        duration: 200,
+                        yoyo: true,
+                        repeat: 5
+                    });
+                });
+            }
+
+            scaleToFit(image, maxWidth, maxHeight) {
+                var scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+                image.setScale(scale);
+            }
+        }
+    </script>
+</body>
+</html>
