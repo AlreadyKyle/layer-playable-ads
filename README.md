@@ -24,13 +24,43 @@ LPS provides a 4-step wizard that:
 
 ## Quick Start
 
-### Prerequisites
+### Option 1: GitHub Codespaces (Recommended - No Local Setup!)
 
+**Run entirely in your browser - zero installation required!**
+
+1. **Open in Codespaces**
+   - Click the green **Code** button on GitHub
+   - Select **Codespaces** tab
+   - Click **Create codespace on [branch]**
+
+   Or use this badge: [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main)
+
+2. **Configure API Keys**
+   - Once Codespaces loads, create your `.env` file:
+   ```bash
+   cp .env.example .env
+   ```
+   - Edit `.env` with your API keys (see [Configuration](#configuration) below)
+
+3. **Launch the App**
+   ```bash
+   ./start.sh
+   ```
+   - Codespaces will automatically forward port 8501
+   - Click the notification to open the app in your browser
+
+**That's it!** The app runs in the cloud, accessible from any device with a browser.
+
+---
+
+### Option 2: Local Installation
+
+**Prerequisites:**
 - Python 3.11+
 - Layer.ai API access
 - Anthropic Claude API access
 
-### Installation
+**Installation:**
 
 ```bash
 # Clone the repository
@@ -45,31 +75,30 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Configuration
+**Run:**
 
 ```bash
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your API keys
-nano .env
-```
-
-Required environment variables:
-
-```
-LAYER_API_KEY=your_layer_api_key
-LAYER_WORKSPACE_ID=your_workspace_id
-ANTHROPIC_API_KEY=your_anthropic_api_key
-```
-
-### Run
-
-```bash
-streamlit run src/app.py
+./start.sh
+# Or manually: streamlit run src/app.py
 ```
 
 Open http://localhost:8501 in your browser.
+
+---
+
+### Configuration
+
+Required environment variables (edit `.env`):
+
+```bash
+LAYER_API_KEY=your_layer_api_key          # From Layer.ai dashboard
+LAYER_WORKSPACE_ID=your_workspace_id      # From Layer.ai dashboard
+ANTHROPIC_API_KEY=your_anthropic_api_key  # From console.anthropic.com
+```
+
+**Getting API Keys:**
+- **Layer.ai**: [app.layer.ai](https://app.layer.ai) → Settings → API Keys
+- **Anthropic**: [console.anthropic.com](https://console.anthropic.com) → API Keys
 
 ---
 
@@ -148,6 +177,7 @@ layer-playable-ads/
 
 | Document | Description |
 |----------|-------------|
+| [Web Workflow Guide](docs/web_workflow.md) | **Complete guide for GitHub Codespaces workflow** |
 | [Product Requirements](docs/product_requirements.md) | PRD with user stories and constraints |
 | [Technical Design](docs/technical_design.md) | Implementation details and APIs |
 | [Architecture](docs/architecture.md) | System diagrams and decisions |
