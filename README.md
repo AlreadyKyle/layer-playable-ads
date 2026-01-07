@@ -24,14 +24,51 @@ LPS provides a 4-step wizard that:
 
 ## Quick Start
 
-### Option 1: GitHub Codespaces (Recommended - No Local Setup!)
+### Option 1: Mac Desktop (Recommended for Development!)
+
+**Use Claude Code desktop app + GitHub Desktop on your Mac**
+
+1. **Clone with GitHub Desktop**
+   - Install [GitHub Desktop](https://desktop.github.com/)
+   - Clone this repository
+   - Switch to `main` branch
+
+2. **Set Up Python**
+   ```bash
+   cd layer-playable-ads
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+3. **Configure API Keys**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
+
+4. **Launch the App**
+   ```bash
+   ./start.sh
+   ```
+
+5. **Open in Claude Code**
+   - Install [Claude Code desktop app](https://claude.ai/download)
+   - Open the project folder
+   - Start developing with AI assistance!
+
+**[📖 Full Mac Desktop Workflow Guide](docs/desktop_workflow.md)**
+
+---
+
+### Option 2: GitHub Codespaces (No Local Setup!)
 
 **Run entirely in your browser - zero installation required!**
 
 1. **Open in Codespaces**
    - Click the green **Code** button on GitHub
    - Select **Codespaces** tab
-   - Click **Create codespace on [branch]**
+   - Click **Create codespace on main**
 
    Or use this badge: [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?hide_repo_select=true&ref=main)
 
@@ -51,9 +88,11 @@ LPS provides a 4-step wizard that:
 
 **That's it!** The app runs in the cloud, accessible from any device with a browser.
 
+**[📖 Full Web Workflow Guide](docs/web_workflow.md)**
+
 ---
 
-### Option 2: Local Installation
+### Option 3: Manual Local Installation
 
 **Prerequisites:**
 - Python 3.11+
@@ -64,11 +103,11 @@ LPS provides a 4-step wizard that:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/layer-playable-ads.git
+git clone https://github.com/AlreadyKyle/layer-playable-ads.git
 cd layer-playable-ads
 
 # Create virtual environment
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
@@ -177,6 +216,7 @@ layer-playable-ads/
 
 | Document | Description |
 |----------|-------------|
+| [Mac Desktop Workflow Guide](docs/desktop_workflow.md) | **Complete guide for Mac + Claude Code + GitHub Desktop** |
 | [Web Workflow Guide](docs/web_workflow.md) | **Complete guide for GitHub Codespaces workflow** |
 | [Product Requirements](docs/product_requirements.md) | PRD with user stories and constraints |
 | [Technical Design](docs/technical_design.md) | Implementation details and APIs |
