@@ -12,6 +12,64 @@ This document defines constraints, schemas, and repository etiquette for Claude 
 
 ---
 
+## Development Workflows
+
+LPS supports multiple development workflows to suit different preferences:
+
+### 1. Mac Desktop Workflow (Recommended for Development)
+
+**Tools:**
+- Claude Code desktop app (AI-assisted development)
+- GitHub Desktop (visual git management)
+- Local Python environment
+
+**Best for:**
+- Active development and feature work
+- AI-assisted coding with Claude Code
+- Full IDE experience
+- Offline capability
+
+**Guide:** [docs/desktop_workflow.md](docs/desktop_workflow.md)
+
+### 2. Web Workflow (GitHub Codespaces)
+
+**Tools:**
+- Browser-based VS Code
+- Cloud Python environment
+- GitHub integration
+
+**Best for:**
+- Quick demos and testing
+- No local setup required
+- Working from any device
+- Collaborative development
+
+**Guide:** [docs/web_workflow.md](docs/web_workflow.md)
+
+### 3. Manual Local Setup
+
+**Tools:**
+- Any text editor or IDE
+- Command-line git
+- Local Python environment
+
+**Best for:**
+- Custom development environments
+- Advanced users
+- Specific IDE preferences
+
+**Guide:** See [README.md](README.md#option-3-manual-local-installation)
+
+---
+
+## Git Branch Strategy
+
+- **Main branch:** `main` (default production branch)
+- **Feature branches:** `feature/description` or `claude/description-xxxxx`
+- **All development should target the `main` branch**
+
+---
+
 ## Hard Constraints (Non-Negotiable)
 
 ### 1. Playable Export Requirements
