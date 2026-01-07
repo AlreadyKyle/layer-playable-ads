@@ -25,4 +25,11 @@ echo "🚀 Launching Streamlit on port 8501..."
 echo "   The app will be available at the forwarded URL"
 echo ""
 
-streamlit run src/app.py
+# Use venv Python if available, otherwise use system streamlit
+if [ -f "./venv/bin/python" ]; then
+    echo "   Using virtual environment Python..."
+    ./venv/bin/python -m streamlit run src/app.py
+else
+    echo "   Using system Streamlit..."
+    streamlit run src/app.py
+fi

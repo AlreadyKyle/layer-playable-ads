@@ -67,7 +67,6 @@ class PlayableConfig:
     width: int = 320
     height: int = 480
     background_color: str = "#000000"
-    store_url: str = "https://apps.apple.com"
     hook_text: str = "Play Now!"
     cta_text: str = "Install Free"
     analytics_id: Optional[str] = None
@@ -322,7 +321,7 @@ class PlayableAssembler:
             WIDTH=config.width,
             HEIGHT=config.height,
             BACKGROUND_COLOR=config.background_color,
-            STORE_URL=config.store_url,
+            STORE_URL="",  # App store URL removed - placeholder for ad network
             HOOK_TEXT=config.hook_text,
             CTA_TEXT=config.cta_text,
             HOOK_DURATION=HOOK_DURATION_MS,

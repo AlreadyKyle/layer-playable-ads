@@ -4,18 +4,29 @@ Shared utilities and configuration for LPS.
 
 import os
 import functools
+from pathlib import Path
 from typing import Optional
 
 import structlog
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
+
+# Get the project root directory (parent of src/)
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+
+# Explicitly load .env file to ensure all variables are in os.environ
+# Use override=True to ensure .env values take precedence
+if ENV_FILE.exists():
+    load_dotenv(ENV_FILE, override=True)
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
