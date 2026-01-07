@@ -169,41 +169,28 @@ def render_step_1():
     st.markdown('<p class="step-header">Step 1: Style Intelligence</p>', unsafe_allow_html=True)
 
     st.write("""
-    Upload competitor screenshots or provide an App Store URL to extract
-    a visual style recipe using AI vision analysis.
+    Upload exactly 3 competitor screenshots to extract a visual style recipe using AI vision analysis.
     """)
 
-    col1, col2 = st.columns(2)
+    st.subheader("📸 Upload 3 Screenshots")
+    uploaded_files = st.file_uploader(
+        "Upload exactly 3 game screenshots",
+        type=["png", "jpg", "jpeg", "webp"],
+        accept_multiple_files=True,
+        key="screenshot_upload",
+        help="Upload 3 screenshots from the competitor game for best style analysis results"
+    )
 
-    with col1:
-        st.subheader("📸 Upload Screenshots")
-        uploaded_files = st.file_uploader(
-            "Upload game screenshots",
-            type=["png", "jpg", "jpeg", "webp"],
-            accept_multiple_files=True,
-            key="screenshot_upload",
-        )
+    if uploaded_files:
+        if len(uploaded_files) != 3:
+            st.warning(f"⚠️ Please upload exactly 3 screenshots (currently {len(uploaded_files)} uploaded)")
+        else:
+            st.success("✅ 3 screenshots uploaded")
 
-        if uploaded_files:
-            st.write(f"Uploaded {len(uploaded_files)} file(s)")
-            for f in uploaded_files:
-                st.image(f, width=200)
-
-    with col2:
-        st.subheader("🔗 App Store URL")
-        app_url = st.text_input(
-            "Enter App Store URL",
-            placeholder="https://apps.apple.com/app/...",
-            key="app_url_input",
-        )
-
-        if app_url:
-            st.info("App Store analysis requires a screenshot of the page")
-            url_screenshot = st.file_uploader(
-                "Upload App Store page screenshot",
-                type=["png", "jpg", "jpeg"],
-                key="url_screenshot",
-            )
+        cols = st.columns(min(len(uploaded_files), 3))
+        for idx, f in enumerate(uploaded_files[:3]):
+            with cols[idx]:
+                st.image(f, caption=f"Screenshot {idx + 1}", use_container_width=True)
 
     # Additional context
     context = st.text_area(
@@ -214,29 +201,22 @@ def render_step_1():
 
     # Analyze button
     if st.button("🔍 Analyze & Extract Style", type="primary"):
-        if not uploaded_files and not (app_url and url_screenshot):
-            st.error("Please upload screenshots or provide an App Store URL with screenshot")
+        if not uploaded_files or len(uploaded_files) != 3:
+            st.error("Please upload exactly 3 screenshots to proceed")
             return
 
         with st.spinner("Analyzing visual style with Claude Vision..."):
             try:
                 spy = CompetitorSpy()
 
-                if uploaded_files:
-                    # Save uploaded files temporarily
-                    temp_paths = []
-                    for f in uploaded_files:
-                        temp_path = Path(f"/tmp/{f.name}")
-                        temp_path.write_bytes(f.read())
-                        temp_paths.append(temp_path)
+                # Save uploaded files temporarily
+                temp_paths = []
+                for f in uploaded_files:
+                    temp_path = Path(f"/tmp/{f.name}")
+                    temp_path.write_bytes(f.read())
+                    temp_paths.append(temp_path)
 
-                    result = spy.analyze_screenshots(temp_paths, context)
-                else:
-                    # App Store analysis
-                    result = spy.analyze_app_store_url(
-                        app_url,
-                        screenshot_image=url_screenshot.read(),
-                    )
+                result = spy.analyze_screenshots(temp_paths, context)
 
                 st.session_state.analysis_result = result
                 st.session_state.style_recipe = result.recipe
@@ -331,9 +311,28 @@ def render_step_2():
                     managed = manager.create_style_from_recipe(recipe)
                     st.session_state.managed_style = managed
                     st.session_state.current_step = 3
+                    st.success("✅ Style created successfully in Layer.ai!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Failed to create style: {str(e)}")
+                    error_msg = str(e)
+                    st.error(f"❌ Failed to create style in Layer.ai")
+
+                    # Show detailed error information
+                    with st.expander("Error Details"):
+                        st.code(error_msg)
+                        st.markdown("""
+                        **Common causes:**
+                        - Layer.ai API temporarily unavailable (try again in a moment)
+                        - Invalid API credentials
+                        - Network connectivity issues
+                        - Rate limiting
+
+                        **Troubleshooting:**
+                        1. Check your API keys in the sidebar
+                        2. Verify your workspace ID is correct
+                        3. Try again in a few seconds
+                        4. Check the Layer.ai dashboard at https://app.layer.ai
+                        """)
 
 
 # =============================================================================

@@ -84,19 +84,21 @@ This document tracks features, enhancements, and technical debt for the LPS proj
 
 | ID | Feature | Priority | Module | Description |
 |----|---------|----------|--------|-------------|
-| P2-009 | App Store URL fetch | P2 | Vision | Auto-fetch screenshots |
-| P2-010 | Style comparison | P2 | Vision | Compare multiple games |
-| P2-011 | Genre detection | P2 | Vision | Auto-categorization |
-| P2-012 | Trend analysis | P2 | Vision | Popular style trends |
+| P2-009 | App Store URL input | P2 | Vision | Accept App Store URL + screenshot for analysis |
+| P2-010 | App Store URL fetch | P2 | Vision | Auto-fetch screenshots from App Store |
+| P2-011 | Store URL in playable | P2 | Playable | Embed store URL for MRAID CTA |
+| P2-012 | Style comparison | P2 | Vision | Compare multiple games |
+| P2-013 | Genre detection | P2 | Vision | Auto-categorization |
+| P2-014 | Trend analysis | P2 | Vision | Popular style trends |
 
 ### Integration
 
 | ID | Feature | Priority | Module | Description |
 |----|---------|----------|--------|-------------|
-| P2-013 | Analytics integration | P2 | Playable | Event tracking |
-| P2-014 | A/B test framework | P2 | All | Variant testing |
-| P2-015 | Webhook notifications | P2 | Core | Forge completion alerts |
-| P2-016 | CI/CD pipeline | P2 | DevOps | Automated testing |
+| P2-015 | Analytics integration | P2 | Playable | Event tracking |
+| P2-016 | A/B test framework | P2 | All | Variant testing |
+| P2-017 | Webhook notifications | P2 | Core | Forge completion alerts |
+| P2-018 | CI/CD pipeline | P2 | DevOps | Automated testing |
 
 ---
 

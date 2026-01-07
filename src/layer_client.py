@@ -130,13 +130,19 @@ class WorkspaceCredits:
 
 QUERIES = {
     "get_workspace_credits": """
-        query GetWorkspaceCredits($workspaceId: ID!) {
-            workspace(id: $workspaceId) {
-                id
-                credits {
-                    available
-                    used
-                    total
+        query GetWorkspaceUsage($workspaceId: ID!) {
+            getWorkspaceUsage(input: {workspaceId: $workspaceId, filtering: []}) {
+                __typename
+                ... on WorkspaceUsage {
+                    workspaceId
+                    entitlement {
+                        balance
+                        hasAccess
+                    }
+                }
+                ... on Error {
+                    code
+                    message
                 }
             }
         }
@@ -353,14 +359,29 @@ class LayerClient:
 
         self._logger.debug("Executing GraphQL", query_preview=query[:50])
 
-        response = await client.post(self.api_url, json=payload)
-        response.raise_for_status()
+        try:
+            response = await client.post(self.api_url, json=payload)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            self._logger.error(
+                "HTTP error from Layer.ai API",
+                status_code=e.response.status_code,
+                response_text=e.response.text[:200],
+            )
+            raise
+        except httpx.TimeoutException as e:
+            self._logger.error("Request timeout", error=str(e))
+            raise LayerClientError(f"Request timeout: {str(e)}")
+        except httpx.RequestError as e:
+            self._logger.error("Request failed", error=str(e))
+            raise LayerClientError(f"Request failed: {str(e)}")
 
         result = response.json()
 
         if "errors" in result:
             error_msg = result["errors"][0].get("message", "Unknown GraphQL error")
-            self._logger.error("GraphQL error", error=error_msg)
+            error_details = result["errors"][0].get("extensions", {})
+            self._logger.error("GraphQL error", error=error_msg, details=error_details)
             raise LayerClientError(f"GraphQL error: {error_msg}")
 
         return result.get("data", {})
@@ -386,11 +407,21 @@ class LayerClient:
             {"workspaceId": self.workspace_id},
         )
 
-        credits_data = data.get("workspace", {}).get("credits", {})
+        usage_data = data.get("getWorkspaceUsage", {})
+
+        # Handle error response
+        if usage_data.get("__typename") == "Error":
+            error_msg = usage_data.get("message", "Unknown error")
+            raise LayerClientError(f"Failed to get workspace usage: {error_msg}")
+
+        entitlement = usage_data.get("entitlement", {})
+        balance = entitlement.get("balance", 0)
+
+        # Layer.ai uses a balance system, treat balance as available credits
         credits = WorkspaceCredits(
-            available=credits_data.get("available", 0),
-            used=credits_data.get("used", 0),
-            total=credits_data.get("total", 0),
+            available=int(balance),
+            used=0,  # Not provided by this API
+            total=int(balance),  # Total is same as available since we don't have used
         )
 
         self._logger.info(
