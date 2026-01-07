@@ -226,10 +226,104 @@ This guide explains how to use Layer.ai Playable Studio on your Mac using **Clau
 
 ---
 
+## Automated Git Scripts (Recommended!)
+
+We've included helper scripts to automate common git workflows. Use these from the terminal for faster development!
+
+### Quick Status Check
+
+```bash
+./git-status.sh
+```
+
+**Shows:**
+- Current branch
+- Sync status with remote (ahead/behind)
+- Modified/added/deleted files
+- Recent commits
+
+**Use when:** You want to quickly check what's changed and if you're in sync.
+
+---
+
+### Sync with Remote
+
+```bash
+./sync.sh
+```
+
+**Does:**
+- Fetches latest changes from GitHub
+- Pulls updates to your current branch
+
+**Use when:** Starting work or checking for team updates.
+
+---
+
+### Quick Save and Push
+
+```bash
+./save.sh "Your commit message here"
+```
+
+**Does:**
+- Shows what will be committed
+- Asks for confirmation
+- Adds all changes
+- Commits with your message
+- Pushes to remote
+
+**Example:**
+```bash
+./save.sh "Add new RPG character preset"
+```
+
+**Use when:** You want to quickly save and push your work without multiple commands.
+
+---
+
+### Combined Workflow Example
+
+```bash
+# Start your day
+./sync.sh
+
+# ... do some work ...
+
+# Check what changed
+./git-status.sh
+
+# Save and push
+./save.sh "Implement color palette extraction improvements"
+```
+
+**This replaces:**
+```bash
+# Traditional git workflow
+git fetch origin
+git pull origin main
+# ... work ...
+git status
+git add -A
+git commit -m "Implement color palette extraction improvements"
+git push -u origin main
+```
+
+---
+
 ## Daily Workflow
 
 ### Starting Your Work Session:
 
+**Option A: Using Automated Scripts (Faster)**
+```bash
+cd ~/Documents/layer-playable-ads
+./sync.sh                    # Get latest changes
+source venv/bin/activate     # Activate Python environment
+./start.sh                   # Start Streamlit
+```
+
+**Option B: Using GitHub Desktop (Visual)**
 1. **Open GitHub Desktop**
    - Click **Fetch origin** to get latest changes
    - Click **Pull origin** if there are updates
@@ -247,6 +341,19 @@ This guide explains how to use Layer.ai Playable Studio on your Mac using **Clau
 
 ### Ending Your Work Session:
 
+**Option A: Using Automated Script (Faster)**
+```bash
+# 1. Stop Streamlit
+Ctrl+C
+
+# 2. Save all changes
+./save.sh "Describe what you did today"
+
+# 3. Deactivate environment
+deactivate
+```
+
+**Option B: Using GitHub Desktop (Visual)**
 1. **Stop Streamlit:**
    - In terminal: `Ctrl+C`
 

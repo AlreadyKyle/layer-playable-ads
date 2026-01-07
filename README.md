@@ -57,6 +57,11 @@ LPS provides a 4-step wizard that:
    - Open the project folder
    - Start developing with AI assistance!
 
+**Automated Git Scripts Included:**
+- `./sync.sh` - Fetch and pull latest changes
+- `./save.sh "message"` - Quick commit and push
+- `./git-status.sh` - Comprehensive status check
+
 **[📖 Full Mac Desktop Workflow Guide](docs/desktop_workflow.md)**
 
 ---
