@@ -1,9 +1,25 @@
 """
-Forge Module - Smart Asset Generation with Credit Guard
+Forge Module - Asset Generation for Playable Ads
 
-Handles asset forging with credit checking and reference image consistency.
+Provides asset generation functionality using Layer.ai's image generation API.
 """
 
-from .asset_forger import AssetForger
+from src.forge.asset_forger import (
+    AssetGenerator,
+    AssetCategory,
+    AssetType,
+    AssetPreset,
+    GeneratedAsset,
+    AssetSet,
+    ASSET_PRESETS,
+)
 
-__all__ = ["AssetForger"]
+__all__ = [
+    "AssetGenerator",
+    "AssetCategory",
+    "AssetType",
+    "AssetPreset",
+    "GeneratedAsset",
+    "AssetSet",
+    "ASSET_PRESETS",
+]

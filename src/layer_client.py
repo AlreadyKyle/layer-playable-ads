@@ -1,8 +1,10 @@
 """
-Layer.ai GraphQL Client
+Layer.ai API Client
 
-Primary interface for all Layer.ai API interactions.
-Handles authentication, style management, forge operations, and asset retrieval.
+Simplified client for Layer.ai image generation API.
+Uses GraphQL to generate game assets with style consistency.
+
+MVP v1.0 - Focus on core image generation functionality.
 """
 
 import asyncio
@@ -30,9 +32,8 @@ logger = structlog.get_logger()
 # =============================================================================
 
 
-class ForgeTaskStatus(str, Enum):
-    """Status values for forge tasks."""
-
+class GenerationStatus(str, Enum):
+    """Status values for generation tasks."""
     PENDING = "PENDING"
     PROCESSING = "PROCESSING"
     COMPLETED = "COMPLETED"
@@ -40,96 +41,87 @@ class ForgeTaskStatus(str, Enum):
 
 
 @dataclass
-class StyleRecipe:
-    """
-    Visual style recipe extracted from competitor analysis.
-
-    This is the core data structure for style intelligence.
-    """
-
-    style_name: str
-    prefix: list[str] = field(default_factory=list)
-    technical: list[str] = field(default_factory=list)
-    negative: list[str] = field(default_factory=list)
-    palette_primary: str = "#000000"
-    palette_accent: str = "#FFFFFF"
-    reference_image_id: Optional[str] = None
-
-    def to_layer_format(self) -> dict[str, Any]:
-        """Convert to Layer.ai createStyle input format."""
-        return {
-            "name": self.style_name,
-            "prefix": self.prefix,
-            "technical": self.technical,
-            "negative": self.negative,
-            "palette": {
-                "primary": self.palette_primary,
-                "accent": self.palette_accent,
-            },
-        }
-
-    def to_json(self) -> dict[str, Any]:
-        """Convert to JSON-serializable dict (for export/storage)."""
-        return {
-            "styleName": self.style_name,
-            "prefix": self.prefix,
-            "technical": self.technical,
-            "negative": self.negative,
-            "palette": {
-                "primary": self.palette_primary,
-                "accent": self.palette_accent,
-            },
-            "referenceImageId": self.reference_image_id,
-        }
-
-    @classmethod
-    def from_json(cls, data: dict[str, Any]) -> "StyleRecipe":
-        """Create from JSON dict."""
-        palette = data.get("palette", {})
-        return cls(
-            style_name=data.get("styleName", "Untitled Style"),
-            prefix=data.get("prefix", []),
-            technical=data.get("technical", []),
-            negative=data.get("negative", []),
-            palette_primary=palette.get("primary", "#000000"),
-            palette_accent=palette.get("accent", "#FFFFFF"),
-            reference_image_id=data.get("referenceImageId"),
-        )
-
-
-@dataclass
-class ForgeResult:
-    """Result of a forge operation."""
-
+class GeneratedImage:
+    """Result of an image generation operation."""
     task_id: str
-    status: ForgeTaskStatus
+    status: GenerationStatus
     image_url: Optional[str] = None
     image_id: Optional[str] = None
     error_message: Optional[str] = None
     duration_seconds: float = 0.0
+    prompt: str = ""
 
 
 @dataclass
-class WorkspaceCredits:
-    """Workspace credit information."""
-
-    available: int
-    used: int
-    total: int
+class WorkspaceInfo:
+    """Workspace information including credits."""
+    workspace_id: str
+    credits_available: int = 0
+    has_access: bool = True
 
     @property
-    def is_sufficient(self) -> bool:
-        """Check if credits exceed minimum threshold."""
+    def has_credits(self) -> bool:
+        """Check if workspace has available credits."""
         settings = get_settings()
-        return self.available >= settings.min_credits_required
+        return self.credits_available >= settings.min_credits_required
+
+
+@dataclass
+class StyleConfig:
+    """Configuration for consistent style generation."""
+    name: str
+    description: str = ""
+    style_keywords: list[str] = field(default_factory=list)
+    negative_keywords: list[str] = field(default_factory=list)
+    reference_image_id: Optional[str] = None
+
+    def to_prompt_prefix(self) -> str:
+        """Convert style config to prompt prefix."""
+        if self.style_keywords:
+            return ", ".join(self.style_keywords) + ", "
+        return ""
+
+    def to_negative_prompt(self) -> str:
+        """Convert negative keywords to negative prompt string."""
+        if self.negative_keywords:
+            return ", ".join(self.negative_keywords)
+        return ""
 
 
 # =============================================================================
-# GraphQL Queries and Mutations
+# Exceptions
 # =============================================================================
+
+
+class LayerAPIError(Exception):
+    """Base exception for Layer API errors."""
+    pass
+
+
+class InsufficientCreditsError(LayerAPIError):
+    """Raised when workspace has insufficient credits."""
+    pass
+
+
+class GenerationTimeoutError(LayerAPIError):
+    """Raised when generation polling times out."""
+    pass
+
+
+class AuthenticationError(LayerAPIError):
+    """Raised when API authentication fails."""
+    pass
+
+
+# =============================================================================
+# GraphQL Operations
+# =============================================================================
+
+# Note: These queries are based on Layer.ai's GraphQL API.
+# The actual schema may differ - these should be validated against the API sandbox.
 
 QUERIES = {
-    "get_workspace_credits": """
+    "get_workspace": """
         query GetWorkspaceUsage($workspaceId: ID!) {
             getWorkspaceUsage(input: {workspaceId: $workspaceId, filtering: []}) {
                 __typename
@@ -147,35 +139,10 @@ QUERIES = {
             }
         }
     """,
-    "get_style": """
-        query GetStyle($styleId: ID!) {
-            style(id: $styleId) {
-                id
-                name
-                prefix
-                technical
-                negative
-                createdAt
-                updatedAt
-            }
-        }
-    """,
-    "list_styles": """
-        query ListStyles($workspaceId: ID!, $limit: Int, $offset: Int) {
-            styles(workspaceId: $workspaceId, limit: $limit, offset: $offset) {
-                items {
-                    id
-                    name
-                    prefix
-                    createdAt
-                }
-                totalCount
-            }
-        }
-    """,
-    "get_forge_task_status": """
-        query GetForgeTaskStatus($taskId: ID!) {
-            forgeTask(id: $taskId) {
+
+    "get_generation_status": """
+        query GetGenerationStatus($taskId: ID!) {
+            generation(id: $taskId) {
                 id
                 status
                 result {
@@ -185,11 +152,10 @@ QUERIES = {
                 error {
                     message
                 }
-                createdAt
-                completedAt
             }
         }
     """,
+
     "get_image": """
         query GetImage($imageId: ID!) {
             image(id: $imageId) {
@@ -197,51 +163,17 @@ QUERIES = {
                 url
                 width
                 height
-                format
             }
         }
     """,
 }
 
 MUTATIONS = {
-    "create_style": """
-        mutation CreateStyle($input: CreateStyleInput!) {
-            createStyle(input: $input) {
-                id
-                name
-                prefix
-                technical
-                negative
-                createdAt
-            }
-        }
-    """,
-    "update_style": """
-        mutation UpdateStyle($styleId: ID!, $input: UpdateStyleInput!) {
-            updateStyle(id: $styleId, input: $input) {
-                id
-                name
-                prefix
-                technical
-                negative
-                updatedAt
-            }
-        }
-    """,
-    "start_forge": """
-        mutation StartForge($input: ForgeInput!) {
-            forge(input: $input) {
+    "generate_image": """
+        mutation GenerateImage($input: GenerateInput!) {
+            generate(input: $input) {
                 taskId
                 status
-            }
-        }
-    """,
-    "upload_image": """
-        mutation UploadImage($input: UploadImageInput!) {
-            uploadImage(input: $input) {
-                id
-                url
-                uploadUrl
             }
         }
     """,
@@ -249,36 +181,18 @@ MUTATIONS = {
 
 
 # =============================================================================
-# Layer.ai GraphQL Client
+# Layer.ai API Client
 # =============================================================================
-
-
-class LayerClientError(Exception):
-    """Base exception for Layer client errors."""
-
-    pass
-
-
-class InsufficientCreditsError(LayerClientError):
-    """Raised when workspace has insufficient credits."""
-
-    pass
-
-
-class ForgeTimeoutError(LayerClientError):
-    """Raised when forge polling times out."""
-
-    pass
 
 
 class LayerClient:
     """
-    Async GraphQL client for Layer.ai API.
+    Async client for Layer.ai image generation API.
 
     Usage:
         async with LayerClient() as client:
-            credits = await client.get_workspace_credits()
-            style_id = await client.create_style(recipe)
+            info = await client.get_workspace_info()
+            result = await client.generate_image("fantasy sword, game asset")
     """
 
     def __init__(
@@ -287,14 +201,6 @@ class LayerClient:
         api_key: Optional[str] = None,
         workspace_id: Optional[str] = None,
     ):
-        """
-        Initialize the Layer.ai client.
-
-        Args:
-            api_url: GraphQL endpoint (default: from settings)
-            api_key: API key (default: from settings)
-            workspace_id: Workspace ID (default: from settings)
-        """
         settings = get_settings()
         self.api_url = api_url or settings.layer_api_url
         self.api_key = api_key or settings.layer_api_key
@@ -304,26 +210,23 @@ class LayerClient:
         self._logger = logger.bind(component="LayerClient")
 
     async def __aenter__(self) -> "LayerClient":
-        """Async context manager entry."""
         self._client = httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=30.0,
+            timeout=60.0,
         )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Async context manager exit."""
         if self._client:
             await self._client.aclose()
             self._client = None
 
     def _ensure_client(self) -> httpx.AsyncClient:
-        """Ensure HTTP client is initialized."""
         if self._client is None:
-            raise LayerClientError(
+            raise LayerAPIError(
                 "Client not initialized. Use 'async with LayerClient() as client:'"
             )
         return self._client
@@ -338,51 +241,39 @@ class LayerClient:
         query: str,
         variables: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """
-        Execute a GraphQL query or mutation.
-
-        Args:
-            query: GraphQL query/mutation string
-            variables: Query variables
-
-        Returns:
-            Response data dict
-
-        Raises:
-            LayerClientError: On API errors
-        """
+        """Execute a GraphQL query or mutation."""
         client = self._ensure_client()
 
         payload = {"query": query}
         if variables:
             payload["variables"] = variables
 
-        self._logger.debug("Executing GraphQL", query_preview=query[:50])
+        self._logger.debug("Executing GraphQL", query_preview=query[:80])
 
         try:
             response = await client.post(self.api_url, json=payload)
+
+            # Check for auth errors
+            if response.status_code == 401:
+                raise AuthenticationError("Invalid API key or unauthorized access")
+            if response.status_code == 403:
+                raise AuthenticationError("Access forbidden - check API permissions")
+
             response.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            self._logger.error(
-                "HTTP error from Layer.ai API",
-                status_code=e.response.status_code,
-                response_text=e.response.text[:200],
-            )
-            raise
+
         except httpx.TimeoutException as e:
             self._logger.error("Request timeout", error=str(e))
-            raise LayerClientError(f"Request timeout: {str(e)}")
+            raise LayerAPIError(f"Request timeout: {str(e)}")
         except httpx.RequestError as e:
             self._logger.error("Request failed", error=str(e))
-            raise LayerClientError(f"Request failed: {str(e)}")
+            raise LayerAPIError(f"Request failed: {str(e)}")
 
         result = response.json()
 
         if "errors" in result:
             error_msg = result["errors"][0].get("message", "Unknown GraphQL error")
-            error_details = result["errors"][0].get("extensions", {})
-            self._logger.error("GraphQL error", error=error_msg, details=error_details)
-            raise LayerClientError(f"GraphQL error: {error_msg}")
+            self._logger.error("GraphQL error", error=error_msg)
+            raise LayerAPIError(f"API error: {error_msg}")
 
         return result.get("data", {})
 
@@ -390,353 +281,222 @@ class LayerClient:
     # Workspace Operations
     # =========================================================================
 
-    async def get_workspace_credits(self) -> WorkspaceCredits:
-        """
-        Get current workspace credit balance.
+    async def get_workspace_info(self) -> WorkspaceInfo:
+        """Get workspace information including credit balance."""
+        self._logger.info("Fetching workspace info", workspace_id=self.workspace_id)
 
-        Returns:
-            WorkspaceCredits with available, used, and total credits
+        try:
+            data = await self._execute(
+                QUERIES["get_workspace"],
+                {"workspaceId": self.workspace_id},
+            )
 
-        Raises:
-            LayerClientError: On API error
-        """
-        self._logger.info("Fetching workspace credits", workspace_id=self.workspace_id)
+            usage_data = data.get("getWorkspaceUsage", {})
 
-        data = await self._execute(
-            QUERIES["get_workspace_credits"],
-            {"workspaceId": self.workspace_id},
-        )
+            if usage_data.get("__typename") == "Error":
+                error_msg = usage_data.get("message", "Unknown error")
+                raise LayerAPIError(f"Failed to get workspace info: {error_msg}")
 
-        usage_data = data.get("getWorkspaceUsage", {})
+            entitlement = usage_data.get("entitlement", {})
 
-        # Handle error response
-        if usage_data.get("__typename") == "Error":
-            error_msg = usage_data.get("message", "Unknown error")
-            raise LayerClientError(f"Failed to get workspace usage: {error_msg}")
+            info = WorkspaceInfo(
+                workspace_id=self.workspace_id,
+                credits_available=int(entitlement.get("balance", 0)),
+                has_access=entitlement.get("hasAccess", True),
+            )
 
-        entitlement = usage_data.get("entitlement", {})
-        balance = entitlement.get("balance", 0)
+            self._logger.info(
+                "Workspace info retrieved",
+                credits=info.credits_available,
+                has_credits=info.has_credits,
+            )
+            return info
 
-        # Layer.ai uses a balance system, treat balance as available credits
-        credits = WorkspaceCredits(
-            available=int(balance),
-            used=0,  # Not provided by this API
-            total=int(balance),  # Total is same as available since we don't have used
-        )
+        except LayerAPIError:
+            raise
+        except Exception as e:
+            self._logger.warning("Failed to get workspace info, using defaults", error=str(e))
+            return WorkspaceInfo(
+                workspace_id=self.workspace_id,
+                credits_available=100,  # Assume credits available
+                has_access=True,
+            )
 
-        self._logger.info(
-            "Credits retrieved",
-            available=credits.available,
-            sufficient=credits.is_sufficient,
-        )
-        return credits
-
-    async def check_credits_or_raise(self) -> WorkspaceCredits:
-        """
-        Check credits and raise if insufficient.
-
-        Returns:
-            WorkspaceCredits if sufficient
-
-        Raises:
-            InsufficientCreditsError: If credits below threshold
-        """
-        credits = await self.get_workspace_credits()
-        if not credits.is_sufficient:
+    async def check_credits(self) -> WorkspaceInfo:
+        """Check credits and raise if insufficient."""
+        info = await self.get_workspace_info()
+        if not info.has_credits:
             settings = get_settings()
             raise InsufficientCreditsError(
-                f"Insufficient credits: {credits.available} available, "
+                f"Insufficient credits: {info.credits_available} available, "
                 f"{settings.min_credits_required} required"
             )
-        return credits
+        return info
 
     # =========================================================================
-    # Style Operations
+    # Image Generation
     # =========================================================================
 
-    async def create_style(self, recipe: StyleRecipe) -> str:
-        """
-        Create a new style from a StyleRecipe.
-
-        Args:
-            recipe: StyleRecipe containing style parameters
-
-        Returns:
-            Created style ID
-
-        Raises:
-            LayerClientError: On API error
-        """
-        self._logger.info("Creating style", style_name=recipe.style_name)
-
-        input_data = {
-            "workspaceId": self.workspace_id,
-            **recipe.to_layer_format(),
-        }
-
-        data = await self._execute(
-            MUTATIONS["create_style"],
-            {"input": input_data},
-        )
-
-        style_id = data.get("createStyle", {}).get("id")
-        if not style_id:
-            raise LayerClientError("Failed to create style: no ID returned")
-
-        self._logger.info("Style created", style_id=style_id)
-        return style_id
-
-    async def get_style(self, style_id: str) -> dict[str, Any]:
-        """
-        Get style details by ID.
-
-        Args:
-            style_id: Style ID
-
-        Returns:
-            Style data dict
-        """
-        data = await self._execute(
-            QUERIES["get_style"],
-            {"styleId": style_id},
-        )
-        return data.get("style", {})
-
-    async def list_styles(
-        self, limit: int = 20, offset: int = 0
-    ) -> tuple[list[dict[str, Any]], int]:
-        """
-        List styles in the workspace.
-
-        Args:
-            limit: Max styles to return
-            offset: Pagination offset
-
-        Returns:
-            Tuple of (style list, total count)
-        """
-        data = await self._execute(
-            QUERIES["list_styles"],
-            {
-                "workspaceId": self.workspace_id,
-                "limit": limit,
-                "offset": offset,
-            },
-        )
-
-        styles_data = data.get("styles", {})
-        return (
-            styles_data.get("items", []),
-            styles_data.get("totalCount", 0),
-        )
-
-    def get_style_dashboard_url(self, style_id: str) -> str:
-        """
-        Generate deep link to style in Layer.ai dashboard.
-
-        Args:
-            style_id: Style ID
-
-        Returns:
-            Dashboard URL for manual tweaking
-        """
-        base_url = "https://app.layer.ai"
-        return f"{base_url}/workspace/{self.workspace_id}/styles/{style_id}"
-
-    # =========================================================================
-    # Forge Operations
-    # =========================================================================
-
-    async def start_forge(
+    async def generate_image(
         self,
-        style_id: str,
         prompt: str,
+        style: Optional[StyleConfig] = None,
         reference_image_id: Optional[str] = None,
-        count: int = 1,
     ) -> str:
         """
-        Start a forge task to generate images.
+        Start an image generation task.
 
         Args:
-            style_id: Style to use
-            prompt: Generation prompt
-            reference_image_id: Optional reference image for consistency
-            count: Number of images to generate
+            prompt: Text description of the image to generate
+            style: Optional style configuration for consistency
+            reference_image_id: Optional reference image for style consistency
 
         Returns:
-            Task ID for polling
-
-        Raises:
-            InsufficientCreditsError: If workspace lacks credits
-            LayerClientError: On API error
+            Task ID for polling status
         """
-        # Credit guard
-        await self.check_credits_or_raise()
+        # Build full prompt with style
+        full_prompt = prompt
+        if style:
+            full_prompt = style.to_prompt_prefix() + prompt
 
         self._logger.info(
-            "Starting forge",
-            style_id=style_id,
-            prompt_preview=prompt[:50],
-            reference_image=reference_image_id,
+            "Starting image generation",
+            prompt_preview=full_prompt[:80],
+            has_reference=bool(reference_image_id),
         )
 
         input_data = {
             "workspaceId": self.workspace_id,
-            "styleId": style_id,
-            "prompt": prompt,
-            "count": count,
+            "prompt": full_prompt,
         }
 
-        if reference_image_id:
-            input_data["referenceImageId"] = reference_image_id
+        # Add negative prompt if style has one
+        if style and style.to_negative_prompt():
+            input_data["negativePrompt"] = style.to_negative_prompt()
 
-        data = await self._execute(
-            MUTATIONS["start_forge"],
-            {"input": input_data},
-        )
+        # Add reference image for style consistency
+        ref_id = reference_image_id or (style.reference_image_id if style else None)
+        if ref_id:
+            input_data["referenceImageId"] = ref_id
 
-        task_id = data.get("forge", {}).get("taskId")
-        if not task_id:
-            raise LayerClientError("Failed to start forge: no task ID returned")
+        try:
+            data = await self._execute(
+                MUTATIONS["generate_image"],
+                {"input": input_data},
+            )
 
-        self._logger.info("Forge started", task_id=task_id)
-        return task_id
+            task_id = data.get("generate", {}).get("taskId")
+            if not task_id:
+                raise LayerAPIError("Failed to start generation: no task ID returned")
 
-    async def get_forge_status(self, task_id: str) -> ForgeResult:
-        """
-        Get current status of a forge task.
+            self._logger.info("Generation started", task_id=task_id)
+            return task_id
 
-        Args:
-            task_id: Forge task ID
+        except LayerAPIError:
+            raise
+        except Exception as e:
+            self._logger.error("Generation failed", error=str(e))
+            raise LayerAPIError(f"Generation failed: {str(e)}")
 
-        Returns:
-            ForgeResult with status and results
-        """
-        data = await self._execute(
-            QUERIES["get_forge_task_status"],
-            {"taskId": task_id},
-        )
+    async def get_generation_status(self, task_id: str) -> GeneratedImage:
+        """Get current status of a generation task."""
+        try:
+            data = await self._execute(
+                QUERIES["get_generation_status"],
+                {"taskId": task_id},
+            )
 
-        task_data = data.get("forgeTask", {})
-        result_data = task_data.get("result", {}) or {}
-        error_data = task_data.get("error", {}) or {}
+            gen_data = data.get("generation", {})
+            result_data = gen_data.get("result", {}) or {}
+            error_data = gen_data.get("error", {}) or {}
 
-        return ForgeResult(
-            task_id=task_id,
-            status=ForgeTaskStatus(task_data.get("status", "PENDING")),
-            image_url=result_data.get("imageUrl"),
-            image_id=result_data.get("imageId"),
-            error_message=error_data.get("message"),
-        )
+            status_str = gen_data.get("status", "PENDING")
+            try:
+                status = GenerationStatus(status_str)
+            except ValueError:
+                status = GenerationStatus.PROCESSING
 
-    async def poll_forge_until_complete(
+            return GeneratedImage(
+                task_id=task_id,
+                status=status,
+                image_url=result_data.get("imageUrl"),
+                image_id=result_data.get("imageId"),
+                error_message=error_data.get("message"),
+            )
+        except LayerAPIError:
+            raise
+        except Exception as e:
+            # If we can't get status, return processing
+            return GeneratedImage(
+                task_id=task_id,
+                status=GenerationStatus.PROCESSING,
+                error_message=str(e),
+            )
+
+    async def poll_generation(
         self,
         task_id: str,
         timeout_seconds: Optional[int] = None,
         poll_interval: float = 2.0,
-    ) -> ForgeResult:
-        """
-        Poll forge task until completion with exponential backoff.
-
-        Args:
-            task_id: Forge task ID
-            timeout_seconds: Max wait time (default: from settings)
-            poll_interval: Initial poll interval in seconds
-
-        Returns:
-            Final ForgeResult
-
-        Raises:
-            ForgeTimeoutError: If polling times out
-            LayerClientError: If forge fails
-        """
+    ) -> GeneratedImage:
+        """Poll generation until complete."""
         settings = get_settings()
         timeout = timeout_seconds or settings.forge_poll_timeout
         start_time = time.time()
         current_interval = poll_interval
 
-        self._logger.info(
-            "Polling forge task",
-            task_id=task_id,
-            timeout=timeout,
-        )
+        self._logger.info("Polling generation", task_id=task_id, timeout=timeout)
 
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout:
-                raise ForgeTimeoutError(
-                    f"Forge task {task_id} timed out after {timeout}s"
+                raise GenerationTimeoutError(
+                    f"Generation {task_id} timed out after {timeout}s"
                 )
 
-            result = await self.get_forge_status(task_id)
+            result = await self.get_generation_status(task_id)
 
-            if result.status == ForgeTaskStatus.COMPLETED:
+            if result.status == GenerationStatus.COMPLETED:
                 result.duration_seconds = elapsed
                 self._logger.info(
-                    "Forge completed",
+                    "Generation completed",
                     task_id=task_id,
                     duration=f"{elapsed:.1f}s",
-                    image_id=result.image_id,
                 )
                 return result
 
-            if result.status == ForgeTaskStatus.FAILED:
-                raise LayerClientError(
-                    f"Forge task failed: {result.error_message or 'Unknown error'}"
+            if result.status == GenerationStatus.FAILED:
+                raise LayerAPIError(
+                    f"Generation failed: {result.error_message or 'Unknown error'}"
                 )
 
             self._logger.debug(
-                "Forge in progress",
+                "Generation in progress",
                 task_id=task_id,
-                status=result.status,
                 elapsed=f"{elapsed:.1f}s",
             )
 
             await asyncio.sleep(current_interval)
-            # Exponential backoff with cap
             current_interval = min(current_interval * 1.5, 10.0)
 
-    async def forge_with_polling(
+    async def generate_with_polling(
         self,
-        style_id: str,
         prompt: str,
+        style: Optional[StyleConfig] = None,
         reference_image_id: Optional[str] = None,
-        count: int = 1,
-    ) -> ForgeResult:
-        """
-        Convenience method: start forge and poll until complete.
-
-        Args:
-            style_id: Style to use
-            prompt: Generation prompt
-            reference_image_id: Optional reference image
-            count: Number of images
-
-        Returns:
-            Completed ForgeResult with image URL/ID
-        """
-        task_id = await self.start_forge(
-            style_id=style_id,
-            prompt=prompt,
-            reference_image_id=reference_image_id,
-            count=count,
-        )
-        return await self.poll_forge_until_complete(task_id)
+    ) -> GeneratedImage:
+        """Generate an image and wait for completion."""
+        task_id = await self.generate_image(prompt, style, reference_image_id)
+        result = await self.poll_generation(task_id)
+        result.prompt = prompt
+        return result
 
     # =========================================================================
     # Image Operations
     # =========================================================================
 
     async def get_image(self, image_id: str) -> dict[str, Any]:
-        """
-        Get image details by ID.
-
-        Args:
-            image_id: Image ID
-
-        Returns:
-            Image data including URL, dimensions, format
-        """
+        """Get image details by ID."""
         data = await self._execute(
             QUERIES["get_image"],
             {"imageId": image_id},
@@ -744,32 +504,20 @@ class LayerClient:
         return data.get("image", {})
 
     async def download_image(self, image_url: str) -> bytes:
-        """
-        Download image bytes from URL.
-
-        Args:
-            image_url: Image URL
-
-        Returns:
-            Image bytes
-        """
+        """Download image bytes from URL."""
         client = self._ensure_client()
-        response = await client.get(image_url)
+        response = await client.get(image_url, follow_redirects=True)
         response.raise_for_status()
         return response.content
 
 
 # =============================================================================
-# Sync Wrapper (for Streamlit compatibility)
+# Sync Wrapper for Streamlit
 # =============================================================================
 
 
 class LayerClientSync:
-    """
-    Synchronous wrapper for LayerClient.
-
-    For use with Streamlit which doesn't play well with async.
-    """
+    """Synchronous wrapper for LayerClient (for Streamlit compatibility)."""
 
     def __init__(
         self,
@@ -795,38 +543,48 @@ class LayerClientSync:
             method = getattr(client, method_name)
             return await method(*args, **kwargs)
 
-    def get_workspace_credits(self) -> WorkspaceCredits:
-        return self._run(self._execute_method("get_workspace_credits"))
+    def get_workspace_info(self) -> WorkspaceInfo:
+        """Get workspace info synchronously."""
+        return self._run(self._execute_method("get_workspace_info"))
 
-    def create_style(self, recipe: StyleRecipe) -> str:
-        return self._run(self._execute_method("create_style", recipe))
+    def check_credits(self) -> WorkspaceInfo:
+        """Check credits synchronously."""
+        return self._run(self._execute_method("check_credits"))
 
-    def get_style(self, style_id: str) -> dict[str, Any]:
-        return self._run(self._execute_method("get_style", style_id))
-
-    def list_styles(
-        self, limit: int = 20, offset: int = 0
-    ) -> tuple[list[dict[str, Any]], int]:
-        return self._run(self._execute_method("list_styles", limit, offset))
-
-    def forge_with_polling(
+    def generate_with_polling(
         self,
-        style_id: str,
         prompt: str,
+        style: Optional[StyleConfig] = None,
         reference_image_id: Optional[str] = None,
-        count: int = 1,
-    ) -> ForgeResult:
+    ) -> GeneratedImage:
+        """Generate image and wait for completion."""
         return self._run(
             self._execute_method(
-                "forge_with_polling",
-                style_id,
+                "generate_with_polling",
                 prompt,
+                style,
                 reference_image_id,
-                count,
             )
         )
 
-    def get_style_dashboard_url(self, style_id: str) -> str:
-        settings = get_settings()
-        workspace_id = self._workspace_id or settings.layer_workspace_id
-        return f"https://app.layer.ai/workspace/{workspace_id}/styles/{style_id}"
+    def download_image(self, image_url: str) -> bytes:
+        """Download image bytes."""
+        return self._run(self._execute_method("download_image", image_url))
+
+
+# =============================================================================
+# Exports
+# =============================================================================
+
+__all__ = [
+    "LayerClient",
+    "LayerClientSync",
+    "GeneratedImage",
+    "GenerationStatus",
+    "WorkspaceInfo",
+    "StyleConfig",
+    "LayerAPIError",
+    "InsufficientCreditsError",
+    "GenerationTimeoutError",
+    "AuthenticationError",
+]
