@@ -7,8 +7,16 @@ This document defines constraints, schemas, and repository etiquette for Claude 
 ## Project Overview
 
 **Name**: Layer.ai Playable Studio (LPS)
-**Purpose**: Intelligence → Playable Ad automation platform
-**Stage**: MVP / Prototype for Layer.ai team demo
+**Version**: MVP v1.0
+**Purpose**: AI-powered playable ad generation using Layer.ai
+**Stage**: Production-ready MVP
+
+### MVP v1.0 Features
+- Style-based asset generation with Layer.ai
+- 3-15-5 timing model (Hook-Gameplay-CTA)
+- Multi-network export (IronSource, Unity, AppLovin, Facebook, Google)
+- MRAID 3.0 compliant HTML5 output
+- Industry-standard ad network specifications
 
 ---
 
@@ -247,37 +255,23 @@ layer-playable-ads/
 ├── README.md
 ├── requirements.txt
 ├── pyproject.toml
-├── claude.md             # This file
+├── CLAUDE.md             # This file
 │
-├── docs/
-│   ├── product_requirements.md
-│   ├── technical_design.md
-│   ├── architecture.md
-│   ├── research_summary.md
-│   ├── changelog.md
-│   ├── project_tracker.md
-│   └── feature_backlog.md
+├── docs/                 # Documentation
+│   └── ...
 │
 ├── src/
-│   ├── __init__.py
-│   ├── app.py            # Streamlit entry point
-│   ├── layer_client.py   # GraphQL client
+│   ├── __init__.py       # Package init (v1.0.0)
+│   ├── app.py            # Streamlit 3-step wizard
+│   ├── layer_client.py   # Layer.ai API client
 │   │
-│   ├── vision/
+│   ├── forge/            # Asset generation
 │   │   ├── __init__.py
-│   │   └── competitor_spy.py
+│   │   └── asset_forger.py  # AssetGenerator, presets
 │   │
-│   ├── workflow/
+│   ├── playable/         # Playable assembly
 │   │   ├── __init__.py
-│   │   └── style_manager.py
-│   │
-│   ├── forge/
-│   │   ├── __init__.py
-│   │   └── asset_forger.py
-│   │
-│   ├── playable/
-│   │   ├── __init__.py
-│   │   ├── assembler.py
+│   │   ├── assembler.py  # PlayableAssembler, network exports
 │   │   └── templates/
 │   │       └── phaser_base.html
 │   │
@@ -288,6 +282,17 @@ layer-playable-ads/
 └── tests/
     └── __init__.py
 ```
+
+### Key Classes (MVP v1.0)
+
+| Class | Location | Purpose |
+|-------|----------|---------|
+| `LayerClientSync` | `layer_client.py` | Layer.ai API with sync wrapper |
+| `StyleConfig` | `layer_client.py` | Style keywords and negative prompts |
+| `AssetGenerator` | `forge/asset_forger.py` | Generate assets from presets |
+| `AssetType` | `forge/asset_forger.py` | Enum: HOOK_CHARACTER, GAMEPLAY_BACKGROUND, etc. |
+| `PlayableAssembler` | `playable/assembler.py` | Build HTML5 playables |
+| `AdNetwork` | `playable/assembler.py` | Enum: IRONSOURCE, UNITY, APPLOVIN, etc. |
 
 ---
 
