@@ -4,6 +4,37 @@ This document defines constraints, schemas, and repository etiquette for Claude 
 
 ---
 
+## IMPORTANT: Task Completion Protocol
+
+**After completing ANY task, ALWAYS provide:**
+
+1. **Test the app link:**
+   ```
+   http://localhost:8501
+   ```
+   Run with: `streamlit run src/app.py`
+
+2. **Git status summary** - What files were changed
+
+3. **Next steps for the user** (using GitHub Desktop):
+   - **To commit:** Open GitHub Desktop → Review changes → Write commit message → Click "Commit to main"
+   - **To create PR:** Click "Push origin" → Then "Create Pull Request" → Fill in PR details on GitHub
+   - **To merge:** On GitHub, review PR → Click "Merge pull request" → Delete branch if desired
+
+4. **Quick commands** (if user prefers terminal):
+   ```bash
+   # Check status
+   git status
+
+   # Commit all changes
+   git add -A && git commit -m "Description of changes"
+
+   # Push to remote
+   git push origin main
+   ```
+
+---
+
 ## Project Overview
 
 **Name**: Layer.ai Playable Studio (LPS)
@@ -262,8 +293,8 @@ layer-playable-ads/
 │
 ├── src/
 │   ├── __init__.py       # Package init (v1.0.0)
-│   ├── app.py            # Streamlit 3-step wizard
-│   ├── layer_client.py   # Layer.ai API client
+│   ├── app.py            # Streamlit 4-step wizard
+│   ├── layer_client.py   # Layer.ai API client + StyleRecipe
 │   │
 │   ├── forge/            # Asset generation
 │   │   ├── __init__.py
@@ -275,12 +306,23 @@ layer-playable-ads/
 │   │   └── templates/
 │   │       └── phaser_base.html
 │   │
+│   ├── vision/           # AI style extraction
+│   │   ├── __init__.py
+│   │   └── competitor_spy.py  # Claude Vision analysis
+│   │
+│   ├── workflow/         # Style management
+│   │   ├── __init__.py
+│   │   └── style_manager.py  # Layer.ai style CRUD
+│   │
 │   └── utils/
 │       ├── __init__.py
 │       └── helpers.py
 │
 └── tests/
-    └── __init__.py
+    ├── __init__.py
+    ├── test_layer_client.py
+    ├── test_assembler.py
+    └── test_asset_forger.py
 ```
 
 ### Key Classes (MVP v1.0)
@@ -289,10 +331,13 @@ layer-playable-ads/
 |-------|----------|---------|
 | `LayerClientSync` | `layer_client.py` | Layer.ai API with sync wrapper |
 | `StyleConfig` | `layer_client.py` | Style keywords and negative prompts |
+| `StyleRecipe` | `layer_client.py` | PRD-compliant style schema from vision analysis |
 | `AssetGenerator` | `forge/asset_forger.py` | Generate assets from presets |
 | `AssetType` | `forge/asset_forger.py` | Enum: HOOK_CHARACTER, GAMEPLAY_BACKGROUND, etc. |
 | `PlayableAssembler` | `playable/assembler.py` | Build HTML5 playables |
 | `AdNetwork` | `playable/assembler.py` | Enum: IRONSOURCE, UNITY, APPLOVIN, etc. |
+| `CompetitorSpy` | `vision/competitor_spy.py` | Claude Vision style extraction |
+| `StyleManager` | `workflow/style_manager.py` | Layer.ai style CRUD operations |
 
 ---
 

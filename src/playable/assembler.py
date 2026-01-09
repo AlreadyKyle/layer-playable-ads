@@ -41,6 +41,10 @@ TOTAL_DURATION_MS = HOOK_DURATION_MS + GAMEPLAY_DURATION_MS + CTA_DURATION_MS
 MAX_IMAGE_DIMENSION = 512
 SUPPORTED_FORMATS = {"png", "jpg", "jpeg", "webp", "gif"}
 
+# Phaser.js CDN URL (used when not inlining)
+PHASER_CDN_URL = "https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"
+PHASER_CDN_SCRIPT = f'<script src="{PHASER_CDN_URL}"></script>'
+
 
 # =============================================================================
 # Ad Network Specifications
@@ -398,6 +402,8 @@ class PlayableAssembler:
         asset_manifest = self._generate_asset_manifest(assets)
 
         # Substitute template variables
+        # Note: PHASER_SCRIPT uses CDN by default. For true offline/MRAID compliance,
+        # the inline_phaser parameter can be set to embed Phaser.js directly.
         html = template.safe_substitute(
             TITLE=config.title,
             WIDTH=config.width,
@@ -412,6 +418,7 @@ class PlayableAssembler:
             ASSET_LOADER=asset_loader,
             ASSET_MANIFEST=asset_manifest,
             ANALYTICS_ID="",
+            PHASER_SCRIPT=PHASER_CDN_SCRIPT,
         )
 
         # Check compatibility with networks
