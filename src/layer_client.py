@@ -88,6 +88,61 @@ class StyleConfig:
         return ""
 
 
+@dataclass
+class StyleRecipe:
+    """
+    Style Recipe extracted from competitor analysis.
+
+    Contains structured style information for Layer.ai asset generation.
+    Maps to the PRD's StyleRecipe schema (FR-A4).
+    """
+    style_name: str
+    prefix: list[str] = field(default_factory=list)
+    technical: list[str] = field(default_factory=list)
+    negative: list[str] = field(default_factory=list)
+    palette_primary: str = "#000000"
+    palette_accent: str = "#FFFFFF"
+    reference_image_id: Optional[str] = None
+
+    def to_style_config(self) -> "StyleConfig":
+        """Convert StyleRecipe to StyleConfig for generation."""
+        return StyleConfig(
+            name=self.style_name,
+            description=f"Style: {self.style_name}",
+            style_keywords=self.prefix + self.technical,
+            negative_keywords=self.negative,
+            reference_image_id=self.reference_image_id,
+        )
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary matching PRD schema."""
+        return {
+            "styleName": self.style_name,
+            "prefix": self.prefix,
+            "technical": self.technical,
+            "negative": self.negative,
+            "palette": {
+                "primary": self.palette_primary,
+                "accent": self.palette_accent,
+            },
+            "referenceImageId": self.reference_image_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StyleRecipe":
+        """Create StyleRecipe from dictionary."""
+        palette = data.get("palette", {})
+        return cls(
+            style_name=data.get("styleName", "Unknown Style"),
+            prefix=data.get("prefix", []),
+            technical=data.get("technical", []),
+            negative=data.get("negative", []),
+            palette_primary=palette.get("primary", "#000000"),
+            palette_accent=palette.get("accent", "#FFFFFF"),
+            reference_image_id=data.get("referenceImageId"),
+        )
+
+
 # =============================================================================
 # Exceptions
 # =============================================================================
@@ -166,6 +221,35 @@ QUERIES = {
             }
         }
     """,
+
+    "get_style": """
+        query GetStyle($styleId: ID!) {
+            style(id: $styleId) {
+                id
+                name
+                prefix
+                technical
+                negative
+                createdAt
+            }
+        }
+    """,
+
+    "list_styles": """
+        query ListStyles($workspaceId: ID!, $limit: Int, $offset: Int) {
+            styles(workspaceId: $workspaceId, limit: $limit, offset: $offset) {
+                items {
+                    id
+                    name
+                    prefix
+                    technical
+                    negative
+                    createdAt
+                }
+                total
+            }
+        }
+    """,
 }
 
 MUTATIONS = {
@@ -174,6 +258,18 @@ MUTATIONS = {
             generate(input: $input) {
                 taskId
                 status
+            }
+        }
+    """,
+
+    "create_style": """
+        mutation CreateStyle($input: CreateStyleInput!) {
+            createStyle(input: $input) {
+                id
+                name
+                prefix
+                technical
+                negative
             }
         }
     """,
@@ -510,6 +606,127 @@ class LayerClient:
         response.raise_for_status()
         return response.content
 
+    # =========================================================================
+    # Style Operations (Module B - FR-B1 to FR-B4)
+    # =========================================================================
+
+    async def create_style(self, recipe: "StyleRecipe") -> str:
+        """
+        Create a new style in Layer.ai from a StyleRecipe.
+
+        Args:
+            recipe: StyleRecipe containing style parameters
+
+        Returns:
+            Style ID of the created style
+        """
+        self._logger.info("Creating style", style_name=recipe.style_name)
+
+        input_data = {
+            "workspaceId": self.workspace_id,
+            "name": recipe.style_name,
+            "prefix": recipe.prefix,
+            "technical": recipe.technical,
+            "negative": recipe.negative,
+        }
+
+        try:
+            data = await self._execute(
+                MUTATIONS["create_style"],
+                {"input": input_data},
+            )
+
+            style_id = data.get("createStyle", {}).get("id")
+            if not style_id:
+                raise LayerAPIError("Failed to create style: no ID returned")
+
+            self._logger.info("Style created", style_id=style_id)
+            return style_id
+
+        except LayerAPIError:
+            raise
+        except Exception as e:
+            self._logger.error("Style creation failed", error=str(e))
+            raise LayerAPIError(f"Style creation failed: {str(e)}")
+
+    async def get_style(self, style_id: str) -> dict[str, Any]:
+        """
+        Get style details by ID.
+
+        Args:
+            style_id: Style ID to retrieve
+
+        Returns:
+            Style data dictionary
+        """
+        self._logger.info("Fetching style", style_id=style_id)
+
+        try:
+            data = await self._execute(
+                QUERIES["get_style"],
+                {"styleId": style_id},
+            )
+            return data.get("style", {})
+        except LayerAPIError:
+            raise
+        except Exception as e:
+            self._logger.error("Failed to fetch style", error=str(e))
+            raise LayerAPIError(f"Failed to fetch style: {str(e)}")
+
+    async def list_styles(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """
+        List styles in the workspace.
+
+        Args:
+            limit: Maximum number of styles to return
+            offset: Pagination offset
+
+        Returns:
+            Tuple of (list of style dicts, total count)
+        """
+        self._logger.info("Listing styles", limit=limit, offset=offset)
+
+        try:
+            data = await self._execute(
+                QUERIES["list_styles"],
+                {
+                    "workspaceId": self.workspace_id,
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
+
+            styles_data = data.get("styles", {})
+            items = styles_data.get("items", [])
+            total = styles_data.get("total", len(items))
+
+            self._logger.info("Styles listed", count=len(items), total=total)
+            return items, total
+
+        except LayerAPIError:
+            raise
+        except Exception as e:
+            self._logger.error("Failed to list styles", error=str(e))
+            raise LayerAPIError(f"Failed to list styles: {str(e)}")
+
+    def get_style_dashboard_url(self, style_id: str) -> str:
+        """
+        Generate Layer.ai dashboard URL for a style.
+
+        Args:
+            style_id: Style ID
+
+        Returns:
+            Dashboard URL for manual tweaking
+        """
+        # Extract base URL from API URL
+        base_url = self.api_url.replace("/v1/graphql", "").replace("api.", "")
+        return f"{base_url}/workspace/{self.workspace_id}/styles/{style_id}"
+
 
 # =============================================================================
 # Sync Wrapper for Streamlit
@@ -571,6 +788,34 @@ class LayerClientSync:
         """Download image bytes."""
         return self._run(self._execute_method("download_image", image_url))
 
+    # =========================================================================
+    # Style Operations (sync wrappers)
+    # =========================================================================
+
+    def create_style(self, recipe: "StyleRecipe") -> str:
+        """Create a style in Layer.ai synchronously."""
+        return self._run(self._execute_method("create_style", recipe))
+
+    def get_style(self, style_id: str) -> dict[str, Any]:
+        """Get style by ID synchronously."""
+        return self._run(self._execute_method("get_style", style_id))
+
+    def list_styles(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List workspace styles synchronously."""
+        return self._run(self._execute_method("list_styles", limit, offset))
+
+    def get_style_dashboard_url(self, style_id: str) -> str:
+        """Get dashboard URL for a style."""
+        settings = get_settings()
+        api_url = self._api_url or settings.layer_api_url
+        workspace_id = self._workspace_id or settings.layer_workspace_id
+        base_url = api_url.replace("/v1/graphql", "").replace("api.", "")
+        return f"{base_url}/workspace/{workspace_id}/styles/{style_id}"
+
 
 # =============================================================================
 # Exports
@@ -583,8 +828,11 @@ __all__ = [
     "GenerationStatus",
     "WorkspaceInfo",
     "StyleConfig",
+    "StyleRecipe",
     "LayerAPIError",
     "InsufficientCreditsError",
     "GenerationTimeoutError",
     "AuthenticationError",
+    "QUERIES",
+    "MUTATIONS",
 ]

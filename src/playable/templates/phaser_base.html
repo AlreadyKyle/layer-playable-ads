@@ -39,8 +39,10 @@
 <body>
     <div id="game-container"></div>
 
-    <!-- Phaser 3 CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+    <!-- Phaser 3 Engine -->
+    <!-- Note: For true offline/MRAID compliance, replace this with inlined Phaser.js -->
+    <!-- The assembler can inject PHASER_INLINE content here for production builds -->
+${PHASER_SCRIPT}
 
     <!-- MRAID Detection & Handler -->
     <script>

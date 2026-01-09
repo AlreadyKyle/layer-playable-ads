@@ -1,24 +1,27 @@
 """
 Layer.ai Playable Studio - Streamlit Application
 
-MVP v1.0 - Simplified playable ad generation workflow.
+MVP v1.0 - AI-powered playable ad generation workflow.
 
-3-Step Process:
-1. Configure Style - Set up visual style for asset generation
-2. Generate Assets - Create game assets using Layer.ai
-3. Export Playable - Build and download for ad networks
+4-Step Process (matching PRD):
+1. Style Intel - Upload screenshots or use AI to extract style
+2. Style Lock - Review and customize the style recipe
+3. Variant Forge - Generate assets using Layer.ai
+4. Export/Preview - Build and download for ad networks
 """
 
 import base64
 from pathlib import Path
 from typing import Optional
 import tempfile
+import json
 
 import streamlit as st
 
 from src.layer_client import (
     LayerClientSync,
     StyleConfig,
+    StyleRecipe,
     WorkspaceInfo,
     LayerAPIError,
 )
@@ -39,6 +42,7 @@ from src.playable.assembler import (
     GAMEPLAY_DURATION_MS,
     CTA_DURATION_MS,
 )
+from src.vision.competitor_spy import CompetitorSpy, AnalysisResult
 from src.utils.helpers import get_settings, validate_api_keys, format_file_size
 
 
@@ -109,11 +113,14 @@ def init_session_state():
     """Initialize session state variables."""
     defaults = {
         "current_step": 1,
-        "style_config": None,
+        "style_recipe": None,        # StyleRecipe from vision analysis
+        "analysis_result": None,     # Full AnalysisResult from CompetitorSpy
+        "style_config": None,        # StyleConfig for generation
         "asset_set": None,
         "playable_html": None,
         "playable_metadata": None,
         "workspace_info": None,
+        "uploaded_images": [],       # For screenshot analysis
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -161,9 +168,10 @@ def render_sidebar():
     st.sidebar.subheader("Workflow")
 
     steps = [
-        ("1. Style Config", 1),
-        ("2. Generate Assets", 2),
-        ("3. Export", 3),
+        ("1. Style Intel", 1),
+        ("2. Style Lock", 2),
+        ("3. Variant Forge", 3),
+        ("4. Export", 4),
     ]
 
     for label, step_num in steps:
@@ -191,12 +199,122 @@ def render_sidebar():
 
 
 # =============================================================================
-# Step 1: Style Configuration
+# Step 1: Style Intel (Vision Analysis)
 # =============================================================================
 
 def render_step_1():
-    """Step 1: Configure visual style."""
-    st.markdown('<p class="step-header">Step 1: Configure Style</p>', unsafe_allow_html=True)
+    """Step 1: Style Intelligence - Upload screenshots for AI analysis."""
+    st.markdown('<p class="step-header">Step 1: Style Intel</p>', unsafe_allow_html=True)
+
+    st.write("""
+    Upload game screenshots to extract a visual style recipe using AI,
+    or skip to manually configure your style.
+    """)
+
+    # Tab selection for different input methods
+    tab1, tab2 = st.tabs(["📸 Upload Screenshots", "✏️ Manual Setup"])
+
+    with tab1:
+        st.subheader("AI-Powered Style Extraction")
+        st.write("Upload 1-3 screenshots from a competitor game or your own game to extract the visual style.")
+
+        uploaded_files = st.file_uploader(
+            "Upload Screenshots (PNG, JPG, WebP)",
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=True,
+            help="Upload 1-3 game screenshots for best results"
+        )
+
+        if uploaded_files:
+            # Show preview
+            cols = st.columns(min(len(uploaded_files), 3))
+            for i, file in enumerate(uploaded_files[:3]):
+                with cols[i]:
+                    st.image(file, caption=file.name, width=150)
+
+            additional_context = st.text_input(
+                "Additional Context (optional)",
+                placeholder="e.g., 'This is a casual match-3 puzzle game'",
+                help="Add context to help the AI understand the game better"
+            )
+
+            if st.button("🔍 Analyze Style with AI", type="primary"):
+                with st.spinner("Analyzing screenshots with Claude Vision..."):
+                    try:
+                        # Save uploaded files temporarily
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            image_paths = []
+                            for file in uploaded_files[:3]:
+                                path = Path(tmpdir) / file.name
+                                path.write_bytes(file.read())
+                                image_paths.append(path)
+                                file.seek(0)  # Reset for later use
+
+                            # Analyze with CompetitorSpy
+                            spy = CompetitorSpy()
+                            result = spy.analyze_screenshots(
+                                image_paths,
+                                additional_context=additional_context if additional_context else None,
+                            )
+
+                            st.session_state.style_recipe = result.recipe
+                            st.session_state.analysis_result = result
+                            st.session_state.current_step = 2
+                            st.success("Style extracted successfully!")
+                            st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Analysis failed: {str(e)}")
+                        st.info("You can still proceed with manual style configuration.")
+
+    with tab2:
+        st.subheader("Skip to Manual Configuration")
+        st.write("Don't have screenshots? You can manually configure your style in the next step.")
+
+        if st.button("Continue to Style Configuration →", type="secondary"):
+            st.session_state.current_step = 2
+            st.rerun()
+
+
+# =============================================================================
+# Step 2: Style Lock (Configure/Edit Style)
+# =============================================================================
+
+def render_step_2():
+    """Step 2: Style Lock - Review and customize the style recipe."""
+    st.markdown('<p class="step-header">Step 2: Style Lock</p>', unsafe_allow_html=True)
+
+    # Check if we have an AI-extracted recipe
+    recipe = st.session_state.style_recipe
+    analysis = st.session_state.analysis_result
+
+    if recipe:
+        st.success("🎨 Style extracted from screenshots! Review and customize below.")
+
+        # Show analysis insights
+        if analysis:
+            with st.expander("View Analysis Details"):
+                st.write(f"**Detected Genre:** {analysis.genre}")
+                st.write(f"**Art Style:** {analysis.art_style}")
+                st.write(f"**Target Audience:** {analysis.target_audience}")
+                if analysis.key_visual_elements:
+                    st.write(f"**Key Elements:** {', '.join(analysis.key_visual_elements)}")
+                if analysis.mood_descriptors:
+                    st.write(f"**Mood:** {', '.join(analysis.mood_descriptors)}")
+
+        # Pre-populate from recipe
+        default_name = recipe.style_name
+        default_keywords = recipe.prefix + recipe.technical
+        default_negative = recipe.negative
+        default_primary = recipe.palette_primary
+        default_accent = recipe.palette_accent
+    else:
+        st.info("Configure your visual style for asset generation.")
+        default_name = "Casual Game Style"
+        default_keywords = ["vibrant colors", "friendly", "clean design"]
+        default_negative = ["realistic", "photographic", "dark", "gloomy", "violent"]
+        default_primary = "#FF6B6B"
+        default_accent = "#4ECDC4"
 
     st.write("""
     Define the visual style for your playable ad assets. This ensures all generated
@@ -210,7 +328,7 @@ def render_step_1():
 
         style_name = st.text_input(
             "Style Name",
-            value="Casual Game Style",
+            value=default_name,
             help="A name to identify this style"
         )
 
@@ -242,11 +360,19 @@ def render_step_1():
             help="Visual art direction for assets"
         )
 
+        # Color palette
+        st.subheader("Color Palette")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            primary_color = st.color_picker("Primary", default_primary)
+        with col_b:
+            accent_color = st.color_picker("Accent", default_accent)
+
     with col2:
         st.subheader("Style Keywords")
 
-        # Pre-populate based on selections
-        default_keywords = {
+        # Pre-populate based on recipe or genre selection
+        genre_keywords = {
             "Casual/Puzzle": ["vibrant colors", "friendly", "clean design"],
             "Match-3": ["colorful", "glossy", "candy-like"],
             "Idle/Clicker": ["satisfying", "progress indicators", "numbers"],
@@ -257,15 +383,21 @@ def render_step_1():
             "Other": ["game asset", "mobile game"],
         }
 
+        # Use recipe keywords if available, otherwise use genre defaults
+        if recipe:
+            initial_keywords = ", ".join(default_keywords)
+        else:
+            initial_keywords = ", ".join(genre_keywords.get(game_genre, []))
+
         style_keywords = st.text_area(
             "Style Keywords (comma-separated)",
-            value=", ".join(default_keywords.get(game_genre, [])),
+            value=initial_keywords,
             help="Keywords to guide asset generation"
         )
 
         negative_keywords = st.text_area(
             "Avoid Keywords (comma-separated)",
-            value="realistic, photographic, dark, gloomy, violent",
+            value=", ".join(default_negative),
             help="Keywords to avoid in generation"
         )
 
@@ -283,6 +415,10 @@ def render_step_1():
         "art_style": art_style,
         "keywords": keywords_list,
         "negative": negative_list,
+        "palette": {
+            "primary": primary_color,
+            "accent": accent_color,
+        }
     }
 
     col1, col2 = st.columns(2)
@@ -295,38 +431,52 @@ def render_step_1():
 
         **Will Avoid**: {', '.join(negative_list[:3])}...
         """)
+        # Show color swatches
+        st.markdown(f"""
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <div style="width: 50px; height: 50px; background: {primary_color}; border-radius: 8px; border: 2px solid #fff;"></div>
+            <div style="width: 50px; height: 50px; background: {accent_color}; border-radius: 8px; border: 2px solid #fff;"></div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # Navigation
     st.markdown("---")
+    col1, col2 = st.columns([1, 2])
 
-    if st.button("Continue to Asset Generation →", type="primary"):
-        # Create style config
-        style = StyleConfig(
-            name=style_name,
-            description=f"{game_genre} - {art_style}",
-            style_keywords=keywords_list,
-            negative_keywords=negative_list,
-        )
+    with col1:
+        if st.button("← Back to Style Intel"):
+            st.session_state.current_step = 1
+            st.rerun()
 
-        st.session_state.style_config = style
-        st.session_state.current_step = 2
-        st.rerun()
+    with col2:
+        if st.button("Continue to Asset Generation →", type="primary"):
+            # Create style config
+            style = StyleConfig(
+                name=style_name,
+                description=f"{game_genre} - {art_style}",
+                style_keywords=keywords_list,
+                negative_keywords=negative_list,
+            )
+
+            st.session_state.style_config = style
+            st.session_state.current_step = 3
+            st.rerun()
 
 
 # =============================================================================
-# Step 2: Generate Assets
+# Step 3: Variant Forge (Generate Assets)
 # =============================================================================
 
-def render_step_2():
-    """Step 2: Generate game assets."""
-    st.markdown('<p class="step-header">Step 2: Generate Assets</p>', unsafe_allow_html=True)
+def render_step_3():
+    """Step 3: Variant Forge - Generate game assets."""
+    st.markdown('<p class="step-header">Step 3: Variant Forge</p>', unsafe_allow_html=True)
 
     style: StyleConfig = st.session_state.style_config
 
     if not style:
         st.warning("Please configure a style first.")
-        if st.button("← Back to Style Config"):
-            st.session_state.current_step = 1
+        if st.button("← Back to Style Lock"):
+            st.session_state.current_step = 2
             st.rerun()
         return
 
@@ -417,8 +567,8 @@ def render_step_2():
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        if st.button("← Back"):
-            st.session_state.current_step = 1
+        if st.button("← Back to Style Lock"):
+            st.session_state.current_step = 2
             st.rerun()
 
     with col2:
@@ -452,7 +602,7 @@ def render_step_2():
                     asset_set.reference_image_id = generator._reference_image_id
 
                     st.session_state.asset_set = asset_set
-                    st.session_state.current_step = 3
+                    st.session_state.current_step = 4
                     st.success(f"Generated {len(asset_set.assets)} assets!")
                     st.rerun()
 
@@ -463,19 +613,19 @@ def render_step_2():
 
 
 # =============================================================================
-# Step 3: Export Playable
+# Step 4: Export Playable
 # =============================================================================
 
-def render_step_3():
-    """Step 3: Assemble and export playable."""
-    st.markdown('<p class="step-header">Step 3: Export Playable Ad</p>', unsafe_allow_html=True)
+def render_step_4():
+    """Step 4: Assemble and export playable."""
+    st.markdown('<p class="step-header">Step 4: Export Playable Ad</p>', unsafe_allow_html=True)
 
     asset_set: AssetSet = st.session_state.asset_set
 
     if not asset_set or not asset_set.assets:
         st.warning("No assets generated. Please go back and generate assets.")
-        if st.button("← Back to Generate"):
-            st.session_state.current_step = 2
+        if st.button("← Back to Variant Forge"):
+            st.session_state.current_step = 3
             st.rerun()
         return
 
@@ -574,8 +724,8 @@ def render_step_3():
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        if st.button("← Back"):
-            st.session_state.current_step = 2
+        if st.button("← Back to Variant Forge"):
+            st.session_state.current_step = 3
             st.rerun()
 
     with col2:
@@ -745,6 +895,8 @@ streamlit run src/app.py
         render_step_2()
     elif step == 3:
         render_step_3()
+    elif step == 4:
+        render_step_4()
 
 
 if __name__ == "__main__":

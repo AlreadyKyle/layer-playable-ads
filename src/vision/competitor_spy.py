@@ -411,4 +411,4 @@ class CompetitorSpy:
 # Export
 # =============================================================================
 
-__all__ = ["CompetitorSpy", "AnalysisResult", "StyleRecipe"]
+__all__ = ["CompetitorSpy", "AnalysisResult"]
