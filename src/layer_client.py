@@ -294,8 +294,8 @@ QUERIES = {
 
 MUTATIONS = {
     "generate_image": """
-        mutation GenerateImage($input: GenerateInput!) {
-            generate(input: $input) {
+        mutation GenerateImages($input: GenerateImagesInput!) {
+            generateImages(input: $input) {
                 taskId
                 status
             }
@@ -523,7 +523,7 @@ class LayerClient:
                 {"input": input_data},
             )
 
-            task_id = data.get("generate", {}).get("taskId")
+            task_id = data.get("generateImages", {}).get("taskId")
             if not task_id:
                 raise LayerAPIError("Failed to start generation: no task ID returned")
 
