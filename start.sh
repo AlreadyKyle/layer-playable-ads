@@ -32,6 +32,14 @@ if ! python3 -c "import streamlit" 2>/dev/null; then
     echo ""
 fi
 
+# Install package in editable mode if not already installed
+if ! python3 -c "import src" 2>/dev/null; then
+    echo "📦 Installing package in editable mode..."
+    pip install -q -e .
+    echo "✅ Package installed"
+    echo ""
+fi
+
 # Launch Streamlit
 echo "🚀 Launching app..."
 echo ""
