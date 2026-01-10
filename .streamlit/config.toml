@@ -1,0 +1,22 @@
+# Streamlit Cloud Configuration
+# See: https://docs.streamlit.io/library/advanced-features/configuration
+
+[server]
+# Streamlit Cloud handles port automatically
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#FF4B4B"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1E2128"
+textColor = "#FAFAFA"
+font = "sans serif"
+
+[client]
+showErrorDetails = true
+toolbarMode = "minimal"

@@ -1,5 +1,7 @@
 """
 Shared utilities and configuration for LPS.
+
+Supports both local development (.env) and Streamlit Cloud (st.secrets).
 """
 
 import os
@@ -16,8 +18,29 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
 
-# Explicitly load .env file to ensure all variables are in os.environ
-# Use override=True to ensure .env values take precedence
+
+def _load_streamlit_secrets_to_env():
+    """
+    Load Streamlit Cloud secrets into environment variables.
+    This allows the same Settings class to work in both local and cloud environments.
+    """
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and len(st.secrets) > 0:
+            for key, value in st.secrets.items():
+                # Only set if not already in environment (allow local override)
+                if key.upper() not in os.environ:
+                    os.environ[key.upper()] = str(value)
+    except Exception:
+        # Not running in Streamlit context, or secrets not available
+        pass
+
+
+# Load Streamlit secrets first (if available)
+_load_streamlit_secrets_to_env()
+
+# Then load .env file (local development)
+# Use override=True to ensure .env values take precedence over secrets
 if ENV_FILE.exists():
     load_dotenv(ENV_FILE, override=True)
 

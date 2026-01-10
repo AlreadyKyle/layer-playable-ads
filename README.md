@@ -66,9 +66,45 @@ LPS provides a 4-step wizard that:
 
 ---
 
-### Option 2: GitHub Codespaces (No Local Setup!)
+### Option 2: Streamlit Cloud (Easiest Cloud Testing!)
 
-**Run entirely in your browser - zero installation required!**
+**Deploy and test instantly - no local setup required!**
+
+1. **Deploy to Streamlit Cloud**
+   - Go to [share.streamlit.io](https://share.streamlit.io)
+   - Sign in with GitHub
+   - Click **New app**
+   - Select this repository (`AlreadyKyle/layer-playable-ads`)
+   - Main file: `streamlit_app.py`
+   - Click **Deploy**
+
+2. **Configure Secrets** (in Streamlit Cloud dashboard)
+   - Go to your app settings (gear icon)
+   - Click **Secrets**
+   - Add your API keys in TOML format:
+   ```toml
+   LAYER_API_KEY = "your_layer_api_key_here"
+   LAYER_WORKSPACE_ID = "your_workspace_id_here"
+   ANTHROPIC_API_KEY = "your_anthropic_api_key_here"
+   ```
+   - Click **Save**
+
+3. **Test Your App**
+   - Your app is live at `https://your-app-name.streamlit.app`
+   - Share the URL with anyone for testing
+   - Changes pushed to GitHub auto-deploy!
+
+**Benefits:**
+- Free hosting for public repos
+- Auto-deploy on git push
+- Shareable URL for testing
+- No server management
+
+---
+
+### Option 3: GitHub Codespaces (Development Environment)
+
+**Full development environment in your browser!**
 
 1. **Open in Codespaces**
    - Click the green **Code** button on GitHub
@@ -97,7 +133,7 @@ LPS provides a 4-step wizard that:
 
 ---
 
-### Option 3: Manual Local Installation
+### Option 4: Manual Local Installation
 
 **Prerequisites:**
 - Python 3.11+
