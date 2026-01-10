@@ -127,9 +127,6 @@ def init_session_state():
             st.session_state[key] = value
 
 
-init_session_state()
-
-
 # =============================================================================
 # Sidebar
 # =============================================================================
@@ -853,6 +850,9 @@ def render_step_4():
 
 def main():
     """Main application entry point."""
+    # Initialize session state first (must be before any st.session_state access)
+    init_session_state()
+
     render_sidebar()
 
     st.title("Layer.ai Playable Studio")
