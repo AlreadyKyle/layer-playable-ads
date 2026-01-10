@@ -400,59 +400,42 @@ def render_step_2():
 
     st.markdown("---")
 
-    # Preview style config
+    # Preview style config using native Streamlit components
     st.subheader("Style Preview")
 
     keywords_list = [k.strip() for k in style_keywords.split(",") if k.strip()]
     negative_list = [k.strip() for k in negative_keywords.split(",") if k.strip()]
 
-    preview_config = {
-        "name": style_name,
-        "genre": game_genre,
-        "art_style": art_style,
-        "keywords": keywords_list,
-        "negative": negative_list,
-        "palette": {
-            "primary": primary_color,
-            "accent": accent_color,
-        }
-    }
+    # Style name and type
+    st.markdown(f"### {style_name}")
+    st.caption(f"{game_genre} · {art_style}")
 
-    # Style Preview Card - formatted nicely instead of raw JSON
-    st.markdown(f"""
-    <div class="info-card">
-        <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 20px;">
-            <div style="flex: 1; min-width: 200px;">
-                <h4 style="color: #ff4b4b; margin: 0 0 8px 0;">{style_name}</h4>
-                <p style="color: #a0aec0; margin: 0 0 12px 0; font-size: 0.9rem;">{game_genre} • {art_style}</p>
+    # Two columns: keywords on left, colors on right
+    col_left, col_right = st.columns([2, 1])
 
-                <div style="margin-bottom: 12px;">
-                    <span style="color: #9ae6b4; font-size: 0.8rem; font-weight: 600;">STYLE KEYWORDS</span>
-                    <p style="color: #fafafa; margin: 4px 0 0 0; font-size: 0.9rem;">{', '.join(keywords_list[:6])}{('...' if len(keywords_list) > 6 else '')}</p>
-                </div>
+    with col_left:
+        # Style keywords
+        st.markdown("**✓ Style Keywords**")
+        keywords_display = ", ".join(keywords_list[:8])
+        if len(keywords_list) > 8:
+            keywords_display += "..."
+        st.success(keywords_display)
 
-                <div>
-                    <span style="color: #fc8181; font-size: 0.8rem; font-weight: 600;">WILL AVOID</span>
-                    <p style="color: #a0aec0; margin: 4px 0 0 0; font-size: 0.9rem;">{', '.join(negative_list[:4])}{('...' if len(negative_list) > 4 else '')}</p>
-                </div>
-            </div>
+        # Negative keywords
+        st.markdown("**✗ Will Avoid**")
+        negative_display = ", ".join(negative_list[:5])
+        if len(negative_list) > 5:
+            negative_display += "..."
+        st.error(negative_display)
 
-            <div style="text-align: center;">
-                <span style="color: #a0aec0; font-size: 0.8rem; font-weight: 600;">COLOR PALETTE</span>
-                <div style="display: flex; gap: 8px; margin-top: 8px;">
-                    <div style="text-align: center;">
-                        <div style="width: 60px; height: 60px; background: {primary_color}; border-radius: 8px; border: 2px solid #fff;"></div>
-                        <span style="font-size: 0.7rem; color: #a0aec0;">Primary</span>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="width: 60px; height: 60px; background: {accent_color}; border-radius: 8px; border: 2px solid #fff;"></div>
-                        <span style="font-size: 0.7rem; color: #a0aec0;">Accent</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    with col_right:
+        # Color palette with visual swatches
+        st.markdown("**Color Palette**")
+        color_col1, color_col2 = st.columns(2)
+        with color_col1:
+            st.color_picker("Primary", primary_color, disabled=True, key="preview_primary")
+        with color_col2:
+            st.color_picker("Accent", accent_color, disabled=True, key="preview_accent")
 
     # Navigation
     st.markdown("---")
