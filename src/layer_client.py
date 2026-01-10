@@ -20,6 +20,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
+    RetryError,
 )
 
 from src.utils.helpers import get_settings
@@ -166,6 +167,45 @@ class GenerationTimeoutError(LayerAPIError):
 class AuthenticationError(LayerAPIError):
     """Raised when API authentication fails."""
     pass
+
+
+def _extract_error_message(error: Exception) -> str:
+    """Extract a clean error message from various exception types."""
+    # Handle tenacity RetryError - unwrap to get the actual error
+    if isinstance(error, RetryError):
+        if error.last_attempt and error.last_attempt.exception():
+            error = error.last_attempt.exception()
+
+    # Handle httpx HTTPStatusError
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        if status == 401:
+            return "Authentication failed - check your LAYER_API_KEY"
+        elif status == 403:
+            return "Access forbidden - check API key permissions"
+        elif status == 404:
+            return "API endpoint not found - check LAYER_API_URL"
+        elif status == 429:
+            return "Rate limited - too many requests, please wait"
+        elif status >= 500:
+            return f"Layer.ai server error (HTTP {status}) - try again later"
+        else:
+            return f"HTTP error {status}: {error.response.text[:100] if error.response.text else 'Unknown'}"
+
+    # Handle connection errors
+    if isinstance(error, httpx.ConnectError):
+        return "Cannot connect to Layer.ai API - check your internet connection"
+
+    if isinstance(error, httpx.TimeoutException):
+        return "Request timed out - Layer.ai API is slow or unavailable"
+
+    # Default: return string representation but clean it up
+    msg = str(error)
+    # Remove ugly Future/state info from tenacity errors
+    if "Future at" in msg and "state=" in msg:
+        return "API request failed after multiple retries - check your API credentials"
+
+    return msg
 
 
 # =============================================================================
@@ -358,11 +398,13 @@ class LayerClient:
             response.raise_for_status()
 
         except httpx.TimeoutException as e:
-            self._logger.error("Request timeout", error=str(e))
-            raise LayerAPIError(f"Request timeout: {str(e)}")
+            clean_msg = _extract_error_message(e)
+            self._logger.error("Request timeout", error=clean_msg)
+            raise LayerAPIError(f"Request timeout: {clean_msg}")
         except httpx.RequestError as e:
-            self._logger.error("Request failed", error=str(e))
-            raise LayerAPIError(f"Request failed: {str(e)}")
+            clean_msg = _extract_error_message(e)
+            self._logger.error("Request failed", error=clean_msg)
+            raise LayerAPIError(f"Request failed: {clean_msg}")
 
         result = response.json()
 
@@ -491,8 +533,9 @@ class LayerClient:
         except LayerAPIError:
             raise
         except Exception as e:
-            self._logger.error("Generation failed", error=str(e))
-            raise LayerAPIError(f"Generation failed: {str(e)}")
+            clean_msg = _extract_error_message(e)
+            self._logger.error("Generation failed", error=clean_msg)
+            raise LayerAPIError(f"Generation failed: {clean_msg}")
 
     async def get_generation_status(self, task_id: str) -> GeneratedImage:
         """Get current status of a generation task."""
