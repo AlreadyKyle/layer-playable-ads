@@ -418,23 +418,41 @@ def render_step_2():
         }
     }
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.json(preview_config)
+    # Style Preview Card - formatted nicely instead of raw JSON
+    st.markdown(f"""
+    <div class="info-card">
+        <div style="display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 20px;">
+            <div style="flex: 1; min-width: 200px;">
+                <h4 style="color: #ff4b4b; margin: 0 0 8px 0;">{style_name}</h4>
+                <p style="color: #a0aec0; margin: 0 0 12px 0; font-size: 0.9rem;">{game_genre} • {art_style}</p>
 
-    with col2:
-        st.info(f"""
-        **Prompt Prefix**: {', '.join(keywords_list[:5])}...
+                <div style="margin-bottom: 12px;">
+                    <span style="color: #9ae6b4; font-size: 0.8rem; font-weight: 600;">STYLE KEYWORDS</span>
+                    <p style="color: #fafafa; margin: 4px 0 0 0; font-size: 0.9rem;">{', '.join(keywords_list[:6])}{('...' if len(keywords_list) > 6 else '')}</p>
+                </div>
 
-        **Will Avoid**: {', '.join(negative_list[:3])}...
-        """)
-        # Show color swatches
-        st.markdown(f"""
-        <div style="display: flex; gap: 10px; margin-top: 10px;">
-            <div style="width: 50px; height: 50px; background: {primary_color}; border-radius: 8px; border: 2px solid #fff;"></div>
-            <div style="width: 50px; height: 50px; background: {accent_color}; border-radius: 8px; border: 2px solid #fff;"></div>
+                <div>
+                    <span style="color: #fc8181; font-size: 0.8rem; font-weight: 600;">WILL AVOID</span>
+                    <p style="color: #a0aec0; margin: 4px 0 0 0; font-size: 0.9rem;">{', '.join(negative_list[:4])}{('...' if len(negative_list) > 4 else '')}</p>
+                </div>
+            </div>
+
+            <div style="text-align: center;">
+                <span style="color: #a0aec0; font-size: 0.8rem; font-weight: 600;">COLOR PALETTE</span>
+                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <div style="text-align: center;">
+                        <div style="width: 60px; height: 60px; background: {primary_color}; border-radius: 8px; border: 2px solid #fff;"></div>
+                        <span style="font-size: 0.7rem; color: #a0aec0;">Primary</span>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="width: 60px; height: 60px; background: {accent_color}; border-radius: 8px; border: 2px solid #fff;"></div>
+                        <span style="font-size: 0.7rem; color: #a0aec0;">Accent</span>
+                    </div>
+                </div>
+            </div>
         </div>
-        """, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
     # Navigation
     st.markdown("---")
