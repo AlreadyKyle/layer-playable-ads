@@ -315,12 +315,14 @@ QUERIES = {
         query ListStyles($input: ListStylesInput!) {
             listStyles(input: $input) {
                 __typename
-                ... on StylesResponse {
-                    styles {
-                        id
-                        name
-                        status
-                        type
+                ... on StylesConnection {
+                    edges {
+                        node {
+                            id
+                            name
+                            status
+                            type
+                        }
                     }
                 }
                 ... on Error {
@@ -900,7 +902,9 @@ class LayerClient:
                 error_msg = result.get("message", "Unknown error")
                 raise LayerAPIError(f"Failed to list styles: {error_msg}")
 
-            styles = result.get("styles", [])
+            # Extract styles from Relay-style edges/node structure
+            edges = result.get("edges", [])
+            styles = [edge.get("node") for edge in edges if edge.get("node")]
             self._logger.info("Styles listed", count=len(styles))
             return styles
 
