@@ -225,12 +225,20 @@ def _extract_error_message(error: Exception) -> str:
             elif "404" in msg:
                 return "API not found (HTTP 404) - check LAYER_API_URL setting"
             else:
-                # Extract status code if possible
+                # Extract HTTP status code more precisely (look for "status_code" or HTTP pattern)
                 import re
-                match = re.search(r'(\d{3})', msg)
+                # Look for patterns like "status_code=400" or "HTTP/1.1 400" or "Client error '400"
+                match = re.search(r'(?:status_code[=:]?\s*|HTTP/\d\.\d\s+|error\s+[\'"]?)(\d{3})', msg)
                 if match:
-                    return f"API request failed (HTTP {match.group(1)}) - check API credentials"
+                    code = match.group(1)
+                    # Only use if it looks like a valid HTTP status code (4xx or 5xx for errors)
+                    if code.startswith(('4', '5')):
+                        return f"API request failed (HTTP {code}) - check API credentials"
         return "API request failed after multiple retries - check your API credentials"
+
+    # If it's a GraphQL error, try to extract the message
+    if "API error:" in msg:
+        return msg
 
     return msg
 
@@ -874,15 +882,11 @@ class LayerClient:
         self._logger.info("Listing styles", limit=limit, workspace_id=self.workspace_id)
 
         try:
-            # ListStylesInput uses 'first' for pagination limit
-            # Workspace context comes from auth token, not input
+            # Try with empty input first - workspace comes from auth token
+            # If that fails, the GraphQL error will tell us what fields are needed
             data = await self._execute(
                 QUERIES["list_styles"],
-                {
-                    "input": {
-                        "first": limit,
-                    }
-                },
+                {"input": {}},
             )
 
             result = data.get("listStyles", {})
