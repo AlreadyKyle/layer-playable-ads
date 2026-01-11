@@ -21,6 +21,7 @@ from src.layer_client import (
     StyleConfig,
     LayerAPIError,
     WorkspaceInfo,
+    extract_error_message,
 )
 from src.forge.asset_forger import (
     AssetGenerator,
@@ -59,7 +60,8 @@ def fetch_workspace_info() -> Optional[dict]:
             "has_access": info.has_access,
         }
     except Exception as e:
-        return {"error": str(e)}
+        # Use helper to get clean error message
+        return {"error": extract_error_message(e)}
 
 
 @st.cache_data(ttl=60, show_spinner="Loading styles from Layer.ai...")  # Cache for 1 minute
@@ -72,7 +74,8 @@ def fetch_styles(limit: int = 50) -> dict:
         styles = client.list_styles(limit=limit)
         return {"styles": styles, "error": None}
     except Exception as e:
-        return {"styles": [], "error": str(e)}
+        # Use helper to get clean error message
+        return {"styles": [], "error": extract_error_message(e)}
 
 
 # =============================================================================

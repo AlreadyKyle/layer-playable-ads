@@ -979,6 +979,14 @@ class LayerClientSync:
 # Exports
 # =============================================================================
 
+def extract_error_message(error: Exception) -> str:
+    """Extract a clean, user-friendly error message from an exception.
+
+    Public wrapper around _extract_error_message for use in other modules.
+    """
+    return _extract_error_message(error)
+
+
 __all__ = [
     "LayerClient",
     "LayerClientSync",
@@ -993,4 +1001,5 @@ __all__ = [
     "AuthenticationError",
     "QUERIES",
     "MUTATIONS",
+    "extract_error_message",
 ]
