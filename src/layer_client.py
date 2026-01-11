@@ -534,21 +534,20 @@ class LayerClient:
         )
 
         # Build input for Layer.ai API
+        # Note: prompt is at TOP LEVEL of GenerateImagesInput, not nested in parameters
         input_data: dict[str, Any] = {
             "workspaceId": self.workspace_id,
-            "parameters": {
-                "prompt": full_prompt,
-            },
+            "prompt": full_prompt,
         }
 
-        # Add negative prompt if style has one
-        if style and style.to_negative_prompt():
-            input_data["parameters"]["negativePrompt"] = style.to_negative_prompt()
+        # Add optional style ID if available
+        if style and style.reference_image_id:
+            input_data["styleId"] = style.reference_image_id
 
-        # Add reference image for style consistency
+        # Add reference image for style consistency (via parameters)
         ref_id = reference_image_id or (style.reference_image_id if style else None)
         if ref_id:
-            input_data["parameters"]["guidanceFiles"] = [{"fileId": ref_id}]
+            input_data["parameters"] = {"guidanceFiles": [{"fileId": ref_id}]}
 
         try:
             data = await self._execute(
@@ -568,11 +567,16 @@ class LayerClient:
             status_str = result.get("status", "PENDING")
             files = result.get("files", [])
 
-            # Map status
-            try:
-                status = GenerationStatus(status_str)
-            except ValueError:
-                status = GenerationStatus.PROCESSING
+            # Map Layer.ai status to internal status
+            # API uses: IN_PROGRESS, COMPLETE, FAILED, CANCELLED, DELETED
+            status_map = {
+                "IN_PROGRESS": GenerationStatus.PROCESSING,
+                "COMPLETE": GenerationStatus.COMPLETED,
+                "FAILED": GenerationStatus.FAILED,
+                "CANCELLED": GenerationStatus.FAILED,
+                "DELETED": GenerationStatus.FAILED,
+            }
+            status = status_map.get(status_str, GenerationStatus.PROCESSING)
 
             # Extract image URL from files if available
             image_url = None
@@ -633,12 +637,13 @@ class LayerClient:
             files = inference.get("files", [])
 
             # Map Layer.ai status to our status
+            # API uses: IN_PROGRESS, COMPLETE, FAILED, CANCELLED, DELETED
             status_map = {
-                "PENDING": GenerationStatus.PENDING,
-                "PROCESSING": GenerationStatus.PROCESSING,
-                "COMPLETED": GenerationStatus.COMPLETED,
+                "IN_PROGRESS": GenerationStatus.PROCESSING,
+                "COMPLETE": GenerationStatus.COMPLETED,
                 "FAILED": GenerationStatus.FAILED,
                 "CANCELLED": GenerationStatus.FAILED,
+                "DELETED": GenerationStatus.FAILED,
             }
             status = status_map.get(status_str, GenerationStatus.PROCESSING)
 
@@ -653,7 +658,8 @@ class LayerClient:
                 image_url = thumbnails.get("url") if thumbnails else None
 
                 # If file is completed, mark as completed
-                if file_status == "COMPLETED" and image_url:
+                # API uses "COMPLETE" not "COMPLETED"
+                if file_status == "COMPLETE" and image_url:
                     status = GenerationStatus.COMPLETED
 
             return GeneratedImage(
