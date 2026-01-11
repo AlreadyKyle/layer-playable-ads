@@ -171,26 +171,39 @@ class AuthenticationError(LayerAPIError):
 
 def _extract_error_message(error: Exception) -> str:
     """Extract a clean error message from various exception types."""
+    original_error = error
+
     # Handle tenacity RetryError - unwrap to get the actual error
     if isinstance(error, RetryError):
-        if error.last_attempt and error.last_attempt.exception():
-            error = error.last_attempt.exception()
+        try:
+            if error.last_attempt:
+                exc = error.last_attempt.exception()
+                if exc:
+                    error = exc
+        except Exception:
+            pass  # Keep original error if unwrap fails
 
     # Handle httpx HTTPStatusError
     if isinstance(error, httpx.HTTPStatusError):
         status = error.response.status_code
+        # Try to get response body for more details
+        try:
+            body = error.response.text[:200] if error.response.text else ""
+        except Exception:
+            body = ""
+
         if status == 401:
-            return "Authentication failed - check your LAYER_API_KEY"
+            return f"Authentication failed (HTTP 401) - check your LAYER_API_KEY. {body}"
         elif status == 403:
-            return "Access forbidden - check API key permissions"
+            return f"Access forbidden (HTTP 403) - check API key permissions. {body}"
         elif status == 404:
-            return "API endpoint not found - check LAYER_API_URL"
+            return f"API endpoint not found (HTTP 404) - check LAYER_API_URL. {body}"
         elif status == 429:
-            return "Rate limited - too many requests, please wait"
+            return "Rate limited (HTTP 429) - too many requests, please wait"
         elif status >= 500:
             return f"Layer.ai server error (HTTP {status}) - try again later"
         else:
-            return f"HTTP error {status}: {error.response.text[:100] if error.response.text else 'Unknown'}"
+            return f"HTTP error {status}: {body if body else 'Unknown error'}"
 
     # Handle connection errors
     if isinstance(error, httpx.ConnectError):
@@ -201,8 +214,22 @@ def _extract_error_message(error: Exception) -> str:
 
     # Default: return string representation but clean it up
     msg = str(error)
-    # Remove ugly Future/state info from tenacity errors
+    # Remove ugly Future/state info from tenacity errors but try to extract HTTP status
     if "Future at" in msg and "state=" in msg:
+        # Try to find HTTP status code in the message
+        if "HTTPStatusError" in msg:
+            if "401" in msg:
+                return "Authentication failed (HTTP 401) - verify your LAYER_API_KEY is correct"
+            elif "403" in msg:
+                return "Access forbidden (HTTP 403) - API key may not have workspace access"
+            elif "404" in msg:
+                return "API not found (HTTP 404) - check LAYER_API_URL setting"
+            else:
+                # Extract status code if possible
+                import re
+                match = re.search(r'(\d{3})', msg)
+                if match:
+                    return f"API request failed (HTTP {match.group(1)}) - check API credentials"
         return "API request failed after multiple retries - check your API credentials"
 
     return msg
@@ -374,9 +401,11 @@ class LayerClient:
         self._logger = logger.bind(component="LayerClient")
 
     async def __aenter__(self) -> "LayerClient":
+        # Layer.ai uses Bearer token authentication with Personal Access Tokens
         self._client = httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {self.api_key}",
+                "x-api-key": self.api_key,  # Fallback header some APIs use
                 "Content-Type": "application/json",
             },
             timeout=self.timeout,
