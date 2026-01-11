@@ -246,9 +246,7 @@ QUERIES = {
                         files {
                             id
                             status
-                            thumbnails {
-                                url
-                            }
+                            signedUrl
                         }
                     }
                 }
@@ -313,9 +311,7 @@ MUTATIONS = {
                     files {
                         id
                         status
-                        thumbnails {
-                            url
-                        }
+                        signedUrl
                     }
                 }
                 ... on Error {
@@ -584,8 +580,7 @@ class LayerClient:
             if files:
                 first_file = files[0]
                 image_id = first_file.get("id")
-                thumbnails = first_file.get("thumbnails", {})
-                image_url = thumbnails.get("url")
+                image_url = first_file.get("signedUrl")
 
             self._logger.info("Generation started", inference_id=inference_id, status=status_str)
 
@@ -654,8 +649,7 @@ class LayerClient:
                 first_file = files[0]
                 image_id = first_file.get("id")
                 file_status = first_file.get("status")
-                thumbnails = first_file.get("thumbnails", {})
-                image_url = thumbnails.get("url") if thumbnails else None
+                image_url = first_file.get("signedUrl")
 
                 # If file is completed, mark as completed
                 # API uses "COMPLETE" not "COMPLETED"
