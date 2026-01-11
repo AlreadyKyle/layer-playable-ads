@@ -38,12 +38,15 @@ The mobile UA market is projected to exceed $120B by 2026. Playable ads consiste
 
 ## Solution Overview
 
-LPS addresses these challenges through a 4-step automated pipeline:
+LPS addresses these challenges through a 3-step workflow:
 
 ```
-Competitor Screenshot → Style Recipe → Forged Assets → Playable Ad
-       (Vision AI)        (Layer.ai)      (Layer.ai)     (Phaser.js)
+Select Style → Generate Assets → Export Playable
+ (Layer.ai)      (Layer.ai)       (Phaser.js)
 ```
+
+**Note**: Layer.ai requires pre-trained styles (LoRAs/checkpoints) for image generation.
+Users must create and train styles in Layer.ai before using this app.
 
 ### Core Value Proposition
 
@@ -169,17 +172,19 @@ Alex is preparing a demo for the CRO to show how Layer.ai can modernize the play
 
 ## User Interface
 
-### Wizard Flow
+### Wizard Flow (3 Steps)
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Style Intel   │ -> │   Style Lock    │ -> │  Variant Forge  │ -> │ Export/Preview  │
-│                 │    │                 │    │                 │    │                 │
-│ • Upload shots  │    │ • Review recipe │    │ • Select presets│    │ • Download HTML │
-│ • Enter URL     │    │ • Edit terms    │    │ • Forge assets  │    │ • Preview ad    │
-│ • AI analysis   │    │ • Create style  │    │ • Track credits │    │ • Validate size │
-└─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  Select Style   │ -> │ Generate Assets │ -> │ Export Playable │
+│                 │    │                 │    │                 │
+│ • Pick from     │    │ • Select presets│    │ • Configure ad  │
+│   Layer.ai      │    │ • Generate      │    │ • Download HTML │
+│   workspace     │    │   images        │    │ • Preview       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
+
+**Prerequisite**: Users must have trained styles in their Layer.ai workspace.
 
 ### UI Principles
 
