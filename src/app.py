@@ -313,30 +313,68 @@ def render_step_2():
         default_primary = "#FF6B6B"
         default_accent = "#4ECDC4"
 
-    # REQUIRED: Layer.ai Style ID
+    # REQUIRED: Layer.ai Style Selection
     st.markdown("---")
-    st.subheader("⚠️ Layer.ai Style ID (Required)")
-    st.write("""
-    **You must provide a Style ID from your Layer.ai workspace.**
+    st.subheader("🎨 Select Layer.ai Style (Required)")
 
-    To get a Style ID:
-    1. Go to [app.layer.ai](https://app.layer.ai)
-    2. Create or select a style in your workspace
-    3. Copy the style ID from the URL (e.g., `abc123-def456-...`)
-    """)
+    # Try to fetch available styles
+    available_styles = []
+    fetch_error = None
+    try:
+        client = LayerClientSync()
+        available_styles = client.list_styles(limit=50)
+    except Exception as e:
+        fetch_error = str(e)
 
-    layer_style_id = st.text_input(
-        "Layer.ai Style ID",
-        value=st.session_state.get("layer_style_id", ""),
-        placeholder="Enter your Layer.ai style ID",
-        help="Required for image generation. Find this in your Layer.ai dashboard URL."
-    )
+    if available_styles:
+        st.success(f"Found {len(available_styles)} styles in your workspace")
+
+        # Build options for selectbox
+        style_options = {"-- Select a style --": ""}
+        for s in available_styles:
+            # Only show COMPLETE styles (trained and ready)
+            status = s.get("status", "")
+            name = s.get("name", "Unnamed")
+            style_id = s.get("id", "")
+            style_type = s.get("type", "")
+
+            if status == "COMPLETE":
+                display_name = f"{name} ({style_type})"
+                style_options[display_name] = style_id
+
+        if len(style_options) > 1:
+            selected_style_name = st.selectbox(
+                "Choose a style from your workspace",
+                options=list(style_options.keys()),
+                help="Only trained (COMPLETE) styles are shown"
+            )
+            layer_style_id = style_options[selected_style_name]
+        else:
+            st.warning("No trained styles found. Create one at [app.layer.ai](https://app.layer.ai)")
+            layer_style_id = ""
+    else:
+        if fetch_error:
+            st.warning(f"Could not fetch styles: {fetch_error}")
+        else:
+            st.info("No styles found in workspace. Create one at [app.layer.ai](https://app.layer.ai)")
+        layer_style_id = ""
+
+    # Manual fallback
+    with st.expander("Or enter Style ID manually"):
+        manual_style_id = st.text_input(
+            "Layer.ai Style ID",
+            value="",
+            placeholder="Paste style ID from Layer.ai URL",
+            help="Find this in your Layer.ai dashboard URL"
+        )
+        if manual_style_id:
+            layer_style_id = manual_style_id
 
     if layer_style_id:
-        st.success(f"✓ Style ID set: {layer_style_id[:20]}...")
+        st.success(f"✓ Style selected: {layer_style_id[:20]}...")
         st.session_state.layer_style_id = layer_style_id
     else:
-        st.warning("⚠️ Style ID is required to generate images")
+        st.error("⚠️ You must select a style to generate images")
 
     st.markdown("---")
     st.write("""

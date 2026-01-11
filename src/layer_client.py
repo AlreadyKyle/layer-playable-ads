@@ -826,36 +826,38 @@ class LayerClient:
     async def list_styles(
         self,
         limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> list[dict[str, Any]]:
         """
         List styles in the workspace.
 
         Args:
             limit: Maximum number of styles to return
-            offset: Pagination offset
 
         Returns:
-            Tuple of (list of style dicts, total count)
+            List of style dicts with id, name, status, type
         """
-        self._logger.info("Listing styles", limit=limit, offset=offset)
+        self._logger.info("Listing styles", limit=limit)
 
         try:
             data = await self._execute(
                 QUERIES["list_styles"],
                 {
-                    "workspaceId": self.workspace_id,
-                    "limit": limit,
-                    "offset": offset,
+                    "input": {
+                        "workspaceId": self.workspace_id,
+                        "first": limit,
+                    }
                 },
             )
 
-            styles_data = data.get("styles", {})
-            items = styles_data.get("items", [])
-            total = styles_data.get("total", len(items))
+            result = data.get("listStyles", {})
 
-            self._logger.info("Styles listed", count=len(items), total=total)
-            return items, total
+            if result.get("__typename") == "Error":
+                error_msg = result.get("message", "Unknown error")
+                raise LayerAPIError(f"Failed to list styles: {error_msg}")
+
+            styles = result.get("styles", [])
+            self._logger.info("Styles listed", count=len(styles))
+            return styles
 
         except LayerAPIError:
             raise
@@ -955,10 +957,9 @@ class LayerClientSync:
     def list_styles(
         self,
         limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> list[dict[str, Any]]:
         """List workspace styles synchronously."""
-        return self._run(self._execute_method("list_styles", limit, offset))
+        return self._run(self._execute_method("list_styles", limit))
 
     def get_style_dashboard_url(self, style_id: str) -> str:
         """Get dashboard URL for a style."""
