@@ -1,12 +1,11 @@
 """
-Layer.ai Playable Studio - Streamlit Application
+Layer.ai Playable Studio v2.0 - Game-Specific Playable Ad Generator
 
-MVP v1.0 - AI-powered playable ad generation workflow.
-
-3-Step Process:
-1. Select Style - Choose from your Layer.ai trained styles
-2. Generate Assets - Create hook, gameplay, and CTA assets
-3. Export Playable - Build and download MRAID-compliant HTML5 playable
+New Workflow:
+1. Input Game - Upload screenshots or enter App Store URL
+2. Analyze & Review - Claude Vision extracts mechanics and style
+3. Generate Assets - Layer.ai creates game-specific art
+4. Export Playable - Build and download MRAID-compliant HTML5 playable
 """
 
 import base64
@@ -16,42 +15,23 @@ from typing import Optional
 
 import streamlit as st
 
-from src.layer_client import (
-    LayerClientSync,
-    StyleConfig,
-    LayerAPIError,
-    WorkspaceInfo,
-    extract_error_message,
-)
-from src.forge.asset_forger import (
-    AssetGenerator,
-    AssetType,
-    AssetSet,
-    ASSET_PRESETS,
-)
-from src.playable.assembler import (
-    PlayableAssembler,
-    PlayableConfig,
-    PlayableMetadata,
-    AdNetwork,
-    NETWORK_SPECS,
-    HOOK_DURATION_MS,
-    GAMEPLAY_DURATION_MS,
-    CTA_DURATION_MS,
-)
+from src.analysis.game_analyzer import GameAnalyzerSync, GameAnalysis
+from src.generation.game_asset_generator import GameAssetGenerator, GeneratedAssetSet
+from src.assembly.builder import PlayableBuilder, PlayableConfig, PlayableResult
+from src.layer_client import LayerClientSync, LayerAPIError, extract_error_message
+from src.templates.registry import MechanicType, TEMPLATE_REGISTRY, list_available_mechanics
 from src.utils.helpers import validate_api_keys, get_settings
 
 
 # =============================================================================
-# Cached API Functions (to prevent re-fetching on every render)
+# Cached Functions
 # =============================================================================
 
-@st.cache_data(ttl=300, show_spinner="Connecting to Layer.ai...")  # Cache for 5 minutes
+@st.cache_data(ttl=300, show_spinner="Connecting to Layer.ai...")
 def fetch_workspace_info() -> Optional[dict]:
-    """Fetch workspace info with caching. Returns dict for serialization."""
+    """Fetch workspace info with caching."""
     try:
         settings = get_settings()
-        # Use shorter timeout for initial fetch to avoid long blocking
         client = LayerClientSync(timeout=float(settings.api_fetch_timeout))
         info = client.get_workspace_info()
         return {
@@ -60,71 +40,54 @@ def fetch_workspace_info() -> Optional[dict]:
             "has_access": info.has_access,
         }
     except Exception as e:
-        # Use helper to get clean error message
         return {"error": extract_error_message(e)}
 
 
-@st.cache_data(ttl=60, show_spinner="Loading styles from Layer.ai...")  # Cache for 1 minute
+@st.cache_data(ttl=60, show_spinner="Loading styles...")
 def fetch_styles(limit: int = 50) -> dict:
-    """Fetch styles with caching. Returns dict for serialization."""
+    """Fetch Layer.ai styles with caching."""
     try:
         settings = get_settings()
-        # Use shorter timeout for initial fetch to avoid long blocking
         client = LayerClientSync(timeout=float(settings.api_fetch_timeout))
         styles = client.list_styles(limit=limit)
         return {"styles": styles, "error": None}
     except Exception as e:
-        # Use helper to get clean error message
         return {"styles": [], "error": extract_error_message(e)}
 
 
 # =============================================================================
-# Page Configuration
+# Page Config
 # =============================================================================
 
 st.set_page_config(
-    page_title="Layer.ai Playable Studio",
+    page_title="Playable Ad Generator",
     page_icon="🎮",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Clean CSS
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; }
     .step-header {
-        font-size: 1.4rem;
+        font-size: 1.5rem;
         font-weight: 600;
         color: #fafafa;
         margin-bottom: 1rem;
         padding: 0.5rem 0;
         border-bottom: 2px solid #ff4b4b;
     }
-    .timing-badge {
+    .mechanic-badge {
         display: inline-block;
         padding: 4px 12px;
         border-radius: 16px;
-        font-size: 0.8rem;
-        margin: 2px;
+        font-size: 0.9rem;
         font-weight: 500;
+        margin: 4px;
     }
-    .hook-badge { background-color: #ff6b6b; color: white; }
-    .gameplay-badge { background-color: #4ecdc4; color: white; }
-    .cta-badge { background-color: #45b7d1; color: white; }
-    .network-badge {
-        display: inline-block;
-        padding: 3px 8px;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        margin: 2px;
-        background-color: #2d3748;
-        color: #a0aec0;
-    }
-    .network-badge.compatible {
-        background-color: #276749;
-        color: #9ae6b4;
-    }
+    .high-confidence { background-color: #276749; color: #9ae6b4; }
+    .medium-confidence { background-color: #744210; color: #fbd38d; }
+    .low-confidence { background-color: #742a2a; color: #feb2b2; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,16 +97,15 @@ st.markdown("""
 # =============================================================================
 
 def init_session_state():
-    """Initialize session state variables."""
+    """Initialize session state."""
     defaults = {
         "current_step": 1,
-        "layer_style_id": None,      # Selected Layer.ai style ID
-        "layer_style_name": None,    # Style name for display
-        "style_config": None,        # StyleConfig for prompt enhancement
-        "asset_set": None,           # Generated assets
-        "playable_html": None,       # Built playable HTML
-        "playable_metadata": None,   # Playable metadata
-        "workspace_info": None,      # Workspace credits info
+        "screenshots": [],  # Uploaded screenshot bytes
+        "game_analysis": None,  # GameAnalysis result
+        "selected_mechanic": None,  # User-confirmed mechanic type
+        "layer_style_id": None,  # Selected Layer.ai style
+        "generated_assets": None,  # GeneratedAssetSet
+        "playable_result": None,  # PlayableResult
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -155,13 +117,13 @@ def init_session_state():
 # =============================================================================
 
 def render_sidebar():
-    """Render sidebar with status and workflow progress."""
-    st.sidebar.title("🎮 Playable Studio")
-    st.sidebar.caption("Layer.ai Playable Ad Generator")
+    """Render sidebar with status and progress."""
+    st.sidebar.title("🎮 Playable Generator")
+    st.sidebar.caption("AI-Powered Game Ad Creation")
 
     # API Status
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Status")
+    st.sidebar.subheader("API Status")
 
     key_status = validate_api_keys()
     all_keys_set = all(key_status.values())
@@ -171,24 +133,20 @@ def render_sidebar():
         name = key.replace("_", " ").title()
         st.sidebar.text(f"{icon} {name}")
 
-    # Credits (uses cached fetch to avoid blocking on every render)
     if all_keys_set:
         info = fetch_workspace_info()
         if info and "error" not in info:
-            st.sidebar.metric("Credits", info.get("credits_available", "?"))
-        elif info and "error" in info:
-            st.sidebar.text("Credits: Unable to fetch")
-        else:
-            st.sidebar.text("Credits: Loading...")
+            st.sidebar.metric("Layer.ai Credits", info.get("credits_available", "?"))
 
     # Workflow Progress
     st.sidebar.markdown("---")
     st.sidebar.subheader("Workflow")
 
     steps = [
-        ("1. Select Style", 1),
-        ("2. Generate Assets", 2),
-        ("3. Export Playable", 3),
+        ("1. Input Game", 1),
+        ("2. Analyze & Review", 2),
+        ("3. Generate Assets", 3),
+        ("4. Export Playable", 4),
     ]
 
     for label, step_num in steps:
@@ -199,423 +157,435 @@ def render_sidebar():
         else:
             st.sidebar.markdown(f"○ {label}")
 
-    # Timing Reference
+    # Supported Games
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Ad Timing (3-15-5)")
-    st.sidebar.markdown(f"""
-    <span class="timing-badge hook-badge">Hook: {HOOK_DURATION_MS//1000}s</span>
-    <span class="timing-badge gameplay-badge">Game: {GAMEPLAY_DURATION_MS//1000}s</span>
-    <span class="timing-badge cta-badge">CTA: {CTA_DURATION_MS//1000}s</span>
-    """, unsafe_allow_html=True)
+    st.sidebar.subheader("Supported Game Types")
+    for mechanic in list_available_mechanics():
+        template = TEMPLATE_REGISTRY[mechanic]
+        st.sidebar.text(f"• {template.name}")
 
-    # Networks
+    # Demo Mode
     st.sidebar.markdown("---")
-    st.sidebar.subheader("Export Networks")
-    st.sidebar.caption("IronSource, Unity, AppLovin, Facebook, Google")
+    st.sidebar.subheader("Quick Demo")
+    st.sidebar.caption("Test without API keys")
+
+    demo_type = st.sidebar.selectbox(
+        "Game Type",
+        options=["match3", "runner", "tapper"],
+        format_func=lambda x: {"match3": "Match-3", "runner": "Runner", "tapper": "Tapper"}[x],
+        key="demo_type_select",
+    )
+
+    if st.sidebar.button("🎮 Generate Demo", key="demo_btn"):
+        from src.playable_factory import PlayableFactory
+        factory = PlayableFactory()
+        demo_result = factory.create_demo(
+            mechanic_type=MechanicType(demo_type),
+            game_name=f"Demo {demo_type.title()}"
+        )
+        st.session_state.playable_result = demo_result
+        st.session_state.current_step = 4
+        st.rerun()
 
 
 # =============================================================================
-# Step 1: Select Style
+# Step 1: Input Game
 # =============================================================================
 
 def render_step_1():
-    """Step 1: Select a Layer.ai style from the workspace."""
-    st.markdown('<p class="step-header">Step 1: Select Layer.ai Style</p>', unsafe_allow_html=True)
+    """Step 1: Input game screenshots."""
+    st.markdown('<p class="step-header">Step 1: Input Your Game</p>', unsafe_allow_html=True)
 
     st.write("""
-    Choose a trained style from your Layer.ai workspace. This style will be used
-    to generate all playable ad assets with consistent visuals.
+    Upload 1-5 screenshots from the game you want to create a playable ad for.
+    The AI will analyze the game mechanics and visual style.
     """)
 
-    st.info("""
-    **Don't have a style yet?**
-    Create one at [app.layer.ai](https://app.layer.ai) by uploading reference images
-    and training a custom style. Only trained (COMPLETE) styles can be used here.
-    """)
+    # Screenshot upload
+    uploaded_files = st.file_uploader(
+        "Upload Game Screenshots",
+        type=["png", "jpg", "jpeg"],
+        accept_multiple_files=True,
+        help="Upload 1-5 screenshots showing the core gameplay",
+    )
 
-    # Fetch available styles (cached to avoid re-fetching on every render)
-    st.subheader("🎨 Available Styles")
+    if uploaded_files:
+        # Display previews
+        cols = st.columns(min(len(uploaded_files), 5))
+        for i, file in enumerate(uploaded_files[:5]):
+            with cols[i]:
+                st.image(file, caption=f"Screenshot {i+1}", width=150)
 
-    # Use cached styles fetch
-    styles_data = fetch_styles(limit=50)
-    available_styles = styles_data.get("styles", [])
-    fetch_error = styles_data.get("error")
-
-    if fetch_error:
-        st.error(f"Could not fetch styles: {fetch_error}")
-        st.write("Check your API keys and try again.")
-        if st.button("🔄 Retry"):
-            fetch_styles.clear()  # Clear cache to force re-fetch
-            st.rerun()
-
-        # Manual fallback
-        st.markdown("---")
-        st.subheader("Manual Entry")
-        manual_id = st.text_input(
-            "Layer.ai Style ID",
-            placeholder="Paste style ID from Layer.ai URL",
+        # Optional game name hint
+        game_name = st.text_input(
+            "Game Name (optional)",
+            placeholder="e.g., Candy Crush, Subway Surfers",
+            help="Helps improve analysis accuracy",
         )
-        if manual_id and st.button("Use This Style", type="primary"):
-            st.session_state.layer_style_id = manual_id
-            st.session_state.layer_style_name = "Manual Style"
-            st.session_state.style_config = StyleConfig(
-                name="Manual Style",
-                description="Manually entered style",
-                style_keywords=[],
-                negative_keywords=[],
-            )
-            st.session_state.current_step = 2
-            st.rerun()
-        return
 
-    # Filter to COMPLETE styles only
-    complete_styles = [s for s in available_styles if s.get("status") == "COMPLETE"]
+        st.session_state.screenshots = [f.read() for f in uploaded_files[:5]]
+        # Reset file position
+        for f in uploaded_files:
+            f.seek(0)
 
-    if not complete_styles:
-        st.warning("""
-        **No trained styles found in your workspace.**
-
-        To create a style:
-        1. Go to [app.layer.ai](https://app.layer.ai)
-        2. Upload reference images for your game's visual style
-        3. Train the style (wait for status: COMPLETE)
-        4. Return here and refresh
-        """)
-
-        if st.button("🔄 Refresh Styles"):
-            fetch_styles.clear()  # Clear cache to force re-fetch
-            st.rerun()
-        return
-
-    st.success(f"Found {len(complete_styles)} trained styles")
-
-    # Display styles as cards
-    cols = st.columns(min(len(complete_styles), 3))
-
-    for i, style in enumerate(complete_styles):
-        with cols[i % 3]:
-            style_id = style.get("id", "")
-            style_name = style.get("name", "Unnamed Style")
-            style_type = style.get("type", "Unknown")
-
-            # Style card
-            with st.container():
-                st.markdown(f"### {style_name}")
-                st.caption(f"Type: {style_type}")
-                st.caption(f"ID: {style_id[:20]}...")
-
-                if st.button(f"Select", key=f"select_{style_id}", type="secondary"):
-                    st.session_state.layer_style_id = style_id
-                    st.session_state.layer_style_name = style_name
-                    st.session_state.style_config = StyleConfig(
-                        name=style_name,
-                        description=f"Layer.ai Style: {style_type}",
-                        style_keywords=["game asset", "mobile game"],
-                        negative_keywords=["blurry", "distorted"],
+        if st.button("🔍 Analyze Game", type="primary"):
+            with st.spinner("Analyzing game with Claude Vision..."):
+                try:
+                    analyzer = GameAnalyzerSync()
+                    analysis = analyzer.analyze_screenshots(
+                        st.session_state.screenshots,
+                        game_name_hint=game_name if game_name else None,
                     )
+                    st.session_state.game_analysis = analysis
                     st.session_state.current_step = 2
                     st.rerun()
-
-    # Manual fallback
-    st.markdown("---")
-    with st.expander("Or enter Style ID manually"):
-        manual_id = st.text_input(
-            "Style ID",
-            placeholder="Paste style ID from Layer.ai URL",
-            key="manual_style_input",
-        )
-        if manual_id:
-            if st.button("Use Manual Style"):
-                st.session_state.layer_style_id = manual_id
-                st.session_state.layer_style_name = "Manual Style"
-                st.session_state.style_config = StyleConfig(
-                    name="Manual Style",
-                    description="Manually entered style",
-                    style_keywords=[],
-                    negative_keywords=[],
-                )
-                st.session_state.current_step = 2
-                st.rerun()
+                except Exception as e:
+                    st.error(f"Analysis failed: {str(e)}")
+    else:
+        st.info("👆 Upload game screenshots to begin")
 
 
 # =============================================================================
-# Step 2: Generate Assets
+# Step 2: Analyze & Review
 # =============================================================================
 
 def render_step_2():
-    """Step 2: Generate playable ad assets."""
-    st.markdown('<p class="step-header">Step 2: Generate Assets</p>', unsafe_allow_html=True)
+    """Step 2: Review and confirm analysis."""
+    st.markdown('<p class="step-header">Step 2: Review Analysis</p>', unsafe_allow_html=True)
 
-    # Check requirements
-    layer_style_id = st.session_state.layer_style_id
-    layer_style_name = st.session_state.layer_style_name
+    analysis: GameAnalysis = st.session_state.game_analysis
 
-    if not layer_style_id:
-        st.error("No style selected. Please go back and select a style.")
-        if st.button("← Back to Style Selection"):
+    if not analysis:
+        st.warning("No analysis available. Please go back and upload screenshots.")
+        if st.button("← Back"):
             st.session_state.current_step = 1
             st.rerun()
         return
 
-    # Show selected style
-    st.success(f"**Style**: {layer_style_name} (`{layer_style_id[:20]}...`)")
-
-    # Asset selection
-    st.subheader("Select Assets to Generate")
-    st.write("""
-    Choose which assets to generate for your playable ad.
-    Assets are organized by the 3-15-5 timing model.
-    """)
-
-    selected_types = []
-
-    col1, col2, col3 = st.columns(3)
+    # Game info
+    col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.markdown("**🎣 Hook (3s)**")
-        st.caption("Grab attention immediately")
+        st.subheader(f"🎮 {analysis.game_name}")
+        if analysis.publisher:
+            st.caption(f"by {analysis.publisher}")
 
-        if st.checkbox("Character", value=True, key="asset_hook_char"):
-            selected_types.append(AssetType.HOOK_CHARACTER)
-        if st.checkbox("Item/Treasure", value=True, key="asset_hook_item"):
-            selected_types.append(AssetType.HOOK_ITEM)
+        # Mechanic type with confidence
+        confidence_class = {
+            "high": "high-confidence",
+            "medium": "medium-confidence",
+            "low": "low-confidence",
+        }.get(analysis.confidence_level.value, "medium-confidence")
+
+        st.markdown(f"""
+        <span class="mechanic-badge {confidence_class}">
+            {analysis.mechanic_type.value.upper()} ({int(analysis.mechanic_confidence * 100)}% confident)
+        </span>
+        """, unsafe_allow_html=True)
+
+        st.write(f"**Why:** {analysis.mechanic_reasoning}")
+
+        # Core loop
+        st.markdown("---")
+        st.subheader("Core Game Loop")
+        st.write(analysis.core_loop_description)
 
     with col2:
-        st.markdown("**🎮 Gameplay (15s)**")
-        st.caption("Core interactive loop")
+        # Visual style
+        st.subheader("Visual Style")
+        st.write(f"**Art:** {analysis.visual_style.art_type}")
+        st.write(f"**Theme:** {analysis.visual_style.theme}")
+        st.write(f"**Mood:** {analysis.visual_style.mood}")
 
-        if st.checkbox("Background", value=True, key="asset_game_bg"):
-            selected_types.append(AssetType.GAMEPLAY_BACKGROUND)
-        if st.checkbox("Collectible", value=True, key="asset_game_collect"):
-            selected_types.append(AssetType.GAMEPLAY_COLLECTIBLE)
-        if st.checkbox("Element", value=False, key="asset_game_elem"):
-            selected_types.append(AssetType.GAMEPLAY_ELEMENT)
+        # Color palette
+        st.write("**Colors:**")
+        color_html = ""
+        for color in analysis.visual_style.color_palette[:6]:
+            color_html += f'<span style="background-color:{color}; padding: 5px 15px; margin: 2px; border-radius: 4px;">&nbsp;</span>'
+        st.markdown(color_html, unsafe_allow_html=True)
 
-    with col3:
-        st.markdown("**📲 CTA (5s)**")
-        st.caption("Drive installs")
+    # Allow override of mechanic type
+    st.markdown("---")
+    st.subheader("Confirm Game Type")
 
-        if st.checkbox("Button", value=True, key="asset_cta_btn"):
-            selected_types.append(AssetType.CTA_BUTTON)
-        if st.checkbox("Banner", value=False, key="asset_cta_banner"):
-            selected_types.append(AssetType.CTA_BANNER)
+    mechanic_options = [m.value for m in list_available_mechanics()]
+    current_index = mechanic_options.index(analysis.mechanic_type.value) if analysis.mechanic_type.value in mechanic_options else 0
 
-    st.write(f"**Selected**: {len(selected_types)} assets")
+    selected = st.selectbox(
+        "Game Mechanic Type",
+        options=mechanic_options,
+        index=current_index,
+        format_func=lambda x: TEMPLATE_REGISTRY[MechanicType(x)].name,
+    )
+
+    st.session_state.selected_mechanic = MechanicType(selected)
+
+    # Show template info
+    template = TEMPLATE_REGISTRY[st.session_state.selected_mechanic]
+    with st.expander("Template Details"):
+        st.write(f"**Template:** {template.name}")
+        st.write(f"**Description:** {template.description}")
+        st.write(f"**Example Games:** {', '.join(template.example_games)}")
+        st.write("**Required Assets:**")
+        for asset in template.required_assets:
+            st.write(f"  • {asset.key}: {asset.description}")
+
+    # Assets needed
+    st.markdown("---")
+    st.subheader("Assets to Generate")
+
+    if analysis.assets_needed:
+        for asset in analysis.assets_needed:
+            st.write(f"• **{asset.key}**: {asset.description}")
+    else:
+        st.info("Using default asset prompts for this template")
 
     # Navigation
     st.markdown("---")
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        if st.button("← Back to Style Selection"):
+        if st.button("← Back to Screenshots"):
             st.session_state.current_step = 1
             st.rerun()
 
     with col2:
-        generate_disabled = len(selected_types) == 0
+        if st.button("Continue to Asset Generation →", type="primary"):
+            st.session_state.current_step = 3
+            st.rerun()
 
-        if st.button(
-            f"⚡ Generate {len(selected_types)} Assets",
-            type="primary",
-            disabled=generate_disabled
-        ):
+
+# =============================================================================
+# Step 3: Generate Assets
+# =============================================================================
+
+def render_step_3():
+    """Step 3: Generate assets with Layer.ai."""
+    st.markdown('<p class="step-header">Step 3: Generate Assets</p>', unsafe_allow_html=True)
+
+    analysis: GameAnalysis = st.session_state.game_analysis
+    mechanic_type = st.session_state.selected_mechanic or analysis.mechanic_type
+
+    # Style selection
+    st.subheader("Select Layer.ai Style")
+    st.write("Choose a trained style from your Layer.ai workspace to generate assets.")
+
+    styles_data = fetch_styles(limit=50)
+    available_styles = styles_data.get("styles", [])
+    fetch_error = styles_data.get("error")
+
+    if fetch_error:
+        st.error(f"Could not fetch styles: {fetch_error}")
+        manual_id = st.text_input("Enter Style ID manually")
+        if manual_id:
+            st.session_state.layer_style_id = manual_id
+    elif not available_styles:
+        st.warning("No trained styles found. Please create one at app.layer.ai")
+        manual_id = st.text_input("Enter Style ID manually")
+        if manual_id:
+            st.session_state.layer_style_id = manual_id
+    else:
+        complete_styles = [s for s in available_styles if s.get("status") == "COMPLETE"]
+
+        if complete_styles:
+            style_options = {s["name"]: s["id"] for s in complete_styles}
+            selected_name = st.selectbox(
+                "Available Styles",
+                options=list(style_options.keys()),
+            )
+            st.session_state.layer_style_id = style_options[selected_name]
+        else:
+            st.warning("No completed styles found")
+
+    # Show what will be generated
+    st.markdown("---")
+    st.subheader("Assets to Generate")
+
+    template = TEMPLATE_REGISTRY[mechanic_type]
+    for asset in template.required_assets:
+        if asset.required:
+            st.write(f"• **{asset.key}**: {asset.description}")
+
+    # Navigation
+    st.markdown("---")
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        if st.button("← Back to Analysis"):
+            st.session_state.current_step = 2
+            st.rerun()
+
+    with col2:
+        can_generate = st.session_state.layer_style_id is not None
+
+        if st.button("⚡ Generate Assets", type="primary", disabled=not can_generate):
             with st.spinner("Generating assets with Layer.ai..."):
                 try:
-                    generator = AssetGenerator()
-                    generator.set_style_id(layer_style_id)
+                    generator = GameAssetGenerator()
 
-                    if st.session_state.style_config:
-                        generator.set_style(st.session_state.style_config)
-
+                    # Progress display
                     progress = st.progress(0)
                     status = st.empty()
 
-                    asset_set = AssetSet(style=st.session_state.style_config)
+                    def progress_callback(current, total, name):
+                        progress.progress(current / total)
+                        status.text(f"Generating {name}...")
 
-                    for i, asset_type in enumerate(selected_types):
-                        preset = ASSET_PRESETS[asset_type]
-                        status.text(f"Generating {preset.name}...")
+                    asset_set = generator.generate_for_game(
+                        analysis=analysis,
+                        style_id=st.session_state.layer_style_id,
+                        progress_callback=progress_callback,
+                    )
 
-                        asset = generator.generate_from_preset(asset_type)
-                        asset_set.assets.append(asset)
-                        asset_set.total_generation_time += asset.generation_time
-
-                        progress.progress((i + 1) / len(selected_types))
-
-                    asset_set.reference_image_id = generator._reference_image_id
-
-                    st.session_state.asset_set = asset_set
-                    st.session_state.current_step = 3
-                    st.success(f"Generated {len(asset_set.assets)} assets!")
+                    st.session_state.generated_assets = asset_set
+                    st.session_state.current_step = 4
+                    st.success(f"Generated {asset_set.valid_count} assets!")
                     st.rerun()
 
                 except LayerAPIError as e:
-                    st.error(f"Layer.ai API Error: {str(e)}")
+                    st.error(f"Layer.ai Error: {str(e)}")
                 except Exception as e:
                     st.error(f"Generation failed: {str(e)}")
 
 
 # =============================================================================
-# Step 3: Export Playable
+# Step 4: Export Playable
 # =============================================================================
 
-def render_step_3():
-    """Step 3: Assemble and export playable ad."""
-    st.markdown('<p class="step-header">Step 3: Export Playable Ad</p>', unsafe_allow_html=True)
+def render_step_4():
+    """Step 4: Export playable ad."""
+    st.markdown('<p class="step-header">Step 4: Export Playable Ad</p>', unsafe_allow_html=True)
 
-    asset_set = st.session_state.asset_set
+    # Check if we're in demo mode (playable_result exists but no assets)
+    is_demo_mode = st.session_state.playable_result is not None and st.session_state.generated_assets is None
 
-    if not asset_set or not asset_set.assets:
-        st.warning("No assets generated. Please go back and generate assets.")
-        if st.button("← Back to Generate Assets"):
-            st.session_state.current_step = 2
+    analysis: GameAnalysis = st.session_state.game_analysis
+    assets: GeneratedAssetSet = st.session_state.generated_assets
+
+    if is_demo_mode:
+        # Skip asset section for demo mode
+        mechanic_type = st.session_state.playable_result.mechanic_type
+    elif not assets:
+        st.warning("No assets generated. Please go back.")
+        if st.button("← Back"):
+            st.session_state.current_step = 3
             st.rerun()
         return
-
-    # Asset Preview
-    st.subheader("Generated Assets")
-
-    cols = st.columns(min(len(asset_set.assets), 4))
-    for i, asset in enumerate(asset_set.assets):
-        with cols[i % len(cols)]:
-            if asset.image_url:
-                st.image(asset.image_url, caption=asset.asset_type.value, width=120)
-
-    st.caption(f"Total generation time: {asset_set.total_generation_time:.1f}s")
-
-    # Playable Settings
-    st.markdown("---")
-    st.subheader("Playable Settings")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        game_name = st.text_input("Game Name", "My Awesome Game")
-        hook_text = st.text_input("Hook Text", "Tap to Play!")
-        cta_text = st.text_input("CTA Text", "Download FREE")
-
-    with col2:
-        store_url_ios = st.text_input(
-            "App Store URL (iOS)",
-            "https://apps.apple.com/app/id123456789",
-        )
-        store_url_android = st.text_input(
-            "Play Store URL (Android)",
-            "https://play.google.com/store/apps/details?id=com.example.game",
-        )
-        bg_color = st.color_picker("Background Color", "#1a1a2e")
-
-    # Canvas Size
-    st.markdown("---")
-    st.subheader("Canvas Size")
-
-    size_preset = st.radio(
-        "Size Preset",
-        options=["Portrait (320x480)", "Square (320x320)", "Landscape (480x320)", "Custom"],
-        horizontal=True,
-    )
-
-    if size_preset == "Portrait (320x480)":
-        width, height = 320, 480
-    elif size_preset == "Square (320x320)":
-        width, height = 320, 320
-    elif size_preset == "Landscape (480x320)":
-        width, height = 480, 320
     else:
-        c1, c2 = st.columns(2)
-        with c1:
-            width = st.number_input("Width", 200, 1080, 320)
-        with c2:
-            height = st.number_input("Height", 200, 1920, 480)
+        mechanic_type = st.session_state.selected_mechanic or analysis.mechanic_type
 
-    # Export Networks
-    st.markdown("---")
-    st.subheader("Export Networks")
+    # Asset preview (skip in demo mode)
+    if not is_demo_mode and assets:
+        st.subheader("Generated Assets")
+        cols = st.columns(min(len(assets.assets), 5))
+        for i, (key, asset) in enumerate(assets.assets.items()):
+            with cols[i % len(cols)]:
+                if asset.is_valid and asset.image_url:
+                    st.image(asset.image_url, caption=key, width=100)
+                else:
+                    st.write(f"❌ {key}")
+                    if asset.error:
+                        st.caption(asset.error[:50])
 
-    network_cols = st.columns(5)
-    selected_networks = []
+        st.caption(f"Generation time: {assets.total_generation_time:.1f}s")
+    elif is_demo_mode:
+        st.info("🎮 **Demo Mode** - Using fallback graphics (colored shapes)")
 
-    network_options = [
-        (AdNetwork.IRONSOURCE, "IronSource"),
-        (AdNetwork.UNITY, "Unity Ads"),
-        (AdNetwork.APPLOVIN, "AppLovin"),
-        (AdNetwork.FACEBOOK, "Facebook"),
-        (AdNetwork.GOOGLE, "Google Ads"),
-    ]
+    # Configuration (skip build options in demo mode - already built)
+    if not is_demo_mode:
+        st.markdown("---")
+        st.subheader("Playable Settings")
 
-    for i, (network, name) in enumerate(network_options):
-        with network_cols[i]:
-            if st.checkbox(name, value=(i < 3), key=f"export_net_{network.value}"):
-                selected_networks.append(network)
+        col1, col2 = st.columns(2)
 
-    # Build Button
-    st.markdown("---")
-    col1, col2 = st.columns([1, 2])
+        with col1:
+            game_name = st.text_input("Game Name", value=analysis.game_name if analysis else "My Game")
+            hook_text = st.text_input("Hook Text", value=analysis.hook_suggestion if analysis else "Tap to Play!")
+            cta_text = st.text_input("CTA Text", value=analysis.cta_suggestion if analysis else "Download FREE")
 
-    with col1:
-        if st.button("← Back to Generate Assets"):
-            st.session_state.current_step = 2
-            st.rerun()
+        with col2:
+            store_url_ios = st.text_input("App Store URL (iOS)", value="https://apps.apple.com/app/id123456789")
+            store_url_android = st.text_input("Play Store URL (Android)", value="https://play.google.com/store/apps/details?id=com.example.game")
+            bg_color = st.color_picker("Background Color", value="#1a1a2e")
 
-    with col2:
-        if st.button("🎬 Build Playable", type="primary"):
-            with st.spinner("Building playable ad..."):
-                try:
-                    assembler = PlayableAssembler()
+        # Size preset
+        size_preset = st.radio(
+            "Canvas Size",
+            options=["Portrait (320x480)", "Square (320x320)", "Landscape (480x320)"],
+            horizontal=True,
+        )
 
-                    # Prepare assets
-                    prepared = assembler.prepare_asset_set(asset_set)
+        if size_preset == "Portrait (320x480)":
+            width, height = 320, 480
+        elif size_preset == "Square (320x320)":
+            width, height = 320, 320
+        else:
+            width, height = 480, 320
 
-                    # Configure
-                    config = PlayableConfig(
-                        title=game_name,
-                        width=int(width),
-                        height=int(height),
-                        background_color=bg_color,
-                        store_url_ios=store_url_ios,
-                        store_url_android=store_url_android,
-                        hook_text=hook_text,
-                        cta_text=cta_text,
-                        game_name=game_name,
-                    )
+        # Build button
+        st.markdown("---")
+        col1, col2 = st.columns([1, 2])
 
-                    # Assemble
-                    html, metadata = assembler.assemble(prepared, config)
+        with col1:
+            if st.button("← Back to Assets"):
+                st.session_state.current_step = 3
+                st.rerun()
 
-                    st.session_state.playable_html = html
-                    st.session_state.playable_metadata = metadata
+        with col2:
+            if st.button("🎬 Build Playable", type="primary"):
+                with st.spinner("Building playable ad..."):
+                    try:
+                        config = PlayableConfig(
+                            game_name=game_name,
+                            title=game_name,
+                            store_url=store_url_ios or store_url_android,
+                            store_url_ios=store_url_ios,
+                            store_url_android=store_url_android,
+                            width=width,
+                            height=height,
+                            background_color=bg_color,
+                            hook_text=hook_text,
+                            cta_text=cta_text,
+                        )
 
-                    st.success("Playable built successfully!")
+                        builder = PlayableBuilder()
+                        result = builder.build(analysis, assets, config)
 
-                except Exception as e:
-                    st.error(f"Build failed: {str(e)}")
+                        st.session_state.playable_result = result
+                        st.success("Playable built successfully!")
+
+                    except Exception as e:
+                        st.error(f"Build failed: {str(e)}")
 
     # Results
-    if st.session_state.playable_html:
-        metadata: PlayableMetadata = st.session_state.playable_metadata
-        html = st.session_state.playable_html
+    if st.session_state.playable_result:
+        result: PlayableResult = st.session_state.playable_result
 
         st.markdown("---")
         st.subheader("✅ Playable Ready")
 
         # Metrics
         col1, col2, col3, col4 = st.columns(4)
-
         with col1:
-            st.metric("File Size", metadata.file_size_formatted)
+            st.metric("File Size", result.file_size_formatted)
         with col2:
-            st.metric("Assets", metadata.asset_count)
+            st.metric("Assets", result.assets_embedded)
         with col3:
-            st.metric("Duration", f"{metadata.duration_ms // 1000}s")
+            st.metric("Mechanic", result.mechanic_type.value)
         with col4:
-            st.metric("Networks", len(metadata.networks_compatible))
+            status = "✅ Valid" if result.is_valid else "⚠️ Issues"
+            st.metric("Status", status)
 
-        # Compatible networks
-        st.write("**Compatible Networks:**")
-        network_html = ""
-        for network_name in metadata.networks_compatible:
-            network_html += f'<span class="network-badge compatible">{network_name}</span>'
-        st.markdown(network_html, unsafe_allow_html=True)
+        if result.validation_errors:
+            for error in result.validation_errors:
+                st.warning(error)
+
+        # Network compatibility
+        networks = ["Google Ads", "Unity", "IronSource", "AppLovin"]
+        if result.file_size_mb <= 2:
+            networks.append("Facebook")
+
+        st.write("**Compatible Networks:** " + ", ".join(networks))
 
         # Downloads
         st.markdown("---")
@@ -626,33 +596,33 @@ def render_step_3():
         with col1:
             st.download_button(
                 label="📥 Download index.html",
-                data=html,
+                data=result.html,
                 file_name="index.html",
                 mime="text/html",
             )
 
         with col2:
-            if st.button("📦 Export for All Networks"):
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    assembler = PlayableAssembler()
-                    results = assembler.export_all_networks(
-                        html,
-                        Path(tmpdir),
-                        selected_networks,
-                    )
+            # Create ZIP
+            import io
+            import zipfile
 
-                    st.write("**Export Results:**")
-                    for network, result in results.items():
-                        if result.success:
-                            st.success(f"✅ {network.value}: {result.file_size_formatted}")
-                        else:
-                            st.error(f"❌ {network.value}: {result.error_message}")
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("index.html", result.html)
+            zip_data = zip_buffer.getvalue()
+
+            st.download_button(
+                label="📦 Download ZIP (Google Ads)",
+                data=zip_data,
+                file_name="playable_ad.zip",
+                mime="application/zip",
+            )
 
         # Preview
         st.markdown("---")
-        if st.checkbox("Show Preview", key="preview_playable"):
+        if st.checkbox("Show Preview"):
             st.subheader("Preview")
-            b64 = base64.b64encode(html.encode()).decode()
+            b64 = base64.b64encode(result.html.encode()).decode()
             st.markdown(f"""
             <iframe
                 src="data:text/html;base64,{b64}"
@@ -662,21 +632,18 @@ def render_step_3():
             ></iframe>
             """, unsafe_allow_html=True)
 
-        # Start Over
+        # Start over
         st.markdown("---")
-        if st.button("🔄 Start New Playable"):
-            # Reset state
+        if st.button("🔄 Create Another Playable"):
+            for key in ["screenshots", "game_analysis", "selected_mechanic",
+                       "layer_style_id", "generated_assets", "playable_result"]:
+                st.session_state[key] = None if key != "screenshots" else []
             st.session_state.current_step = 1
-            st.session_state.layer_style_id = None
-            st.session_state.layer_style_name = None
-            st.session_state.asset_set = None
-            st.session_state.playable_html = None
-            st.session_state.playable_metadata = None
             st.rerun()
 
 
 # =============================================================================
-# Main Application
+# Main
 # =============================================================================
 
 def main():
@@ -684,24 +651,32 @@ def main():
     init_session_state()
     render_sidebar()
 
-    st.title("Layer.ai Playable Studio")
-    st.caption("Generate AI-powered playable ads for mobile games")
+    st.title("🎮 Playable Ad Generator")
+    st.caption("Create game-specific playable ads using AI")
 
-    # Check API keys
-    keys = validate_api_keys()
-    if not all(keys.values()):
-        st.error("⚠️ Missing API keys. Please configure your environment.")
-        st.markdown("""
-        **Required keys:**
-        - `LAYER_API_KEY` - Your Layer.ai API key
-        - `LAYER_WORKSPACE_ID` - Your Layer.ai workspace ID
-        - `ANTHROPIC_API_KEY` - Your Anthropic API key (for future features)
+    # Check if we're in demo mode (step 4 with playable result but no assets)
+    is_demo_mode = (
+        st.session_state.current_step == 4
+        and st.session_state.playable_result is not None
+        and st.session_state.generated_assets is None
+    )
 
-        **For Streamlit Cloud:** Add these in Settings → Secrets
+    # Check API keys (skip if in demo mode)
+    if not is_demo_mode:
+        keys = validate_api_keys()
+        if not all(keys.values()):
+            st.warning("⚠️ Missing API keys. Use Demo Mode in sidebar to test without keys.")
+            st.markdown("""
+            **Required keys for full workflow:**
+            - `LAYER_API_KEY` - Your Layer.ai API key
+            - `LAYER_WORKSPACE_ID` - Your Layer.ai workspace ID
+            - `ANTHROPIC_API_KEY` - Your Anthropic API key
 
-        **For local development:** Create a `.env` file
-        """)
-        return
+            Create a `.env` file or add to Streamlit secrets.
+
+            **Or try Demo Mode** in the sidebar to see the playable output without API keys.
+            """)
+            return
 
     # Render current step
     step = st.session_state.current_step
@@ -712,6 +687,8 @@ def main():
         render_step_2()
     elif step == 3:
         render_step_3()
+    elif step == 4:
+        render_step_4()
 
 
 if __name__ == "__main__":

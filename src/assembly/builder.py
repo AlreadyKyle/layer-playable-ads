@@ -17,11 +17,15 @@ from typing import Optional
 
 from src.analysis.game_analyzer import GameAnalysis
 from src.generation.game_asset_generator import GeneratedAssetSet
+from src.generation.sound_generator import PROCEDURAL_SOUNDS_JS
 from src.templates.registry import MechanicType, TEMPLATE_REGISTRY, get_template
 
 
 # Phaser.js CDN (will be inlined for production)
 PHASER_CDN = '<script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>'
+
+# Sound effects script (procedural Web Audio API sounds)
+SOUND_FX_SCRIPT = f'<script>\n{PROCEDURAL_SOUNDS_JS}\n</script>'
 
 # Timing constants (milliseconds)
 HOOK_DURATION_MS = 3000
@@ -55,6 +59,9 @@ class PlayableConfig:
     # Text
     hook_text: str = "Tap to Play!"
     cta_text: str = "Download FREE"
+
+    # Sound
+    sound_enabled: bool = True
 
 
 @dataclass
@@ -283,8 +290,8 @@ class PlayableBuilder:
             # Assets
             "ASSET_MANIFEST": json.dumps(asset_manifest),
 
-            # Phaser script
-            "PHASER_SCRIPT": PHASER_CDN,
+            # Phaser script + Sound effects
+            "PHASER_SCRIPT": PHASER_CDN + ("\n" + SOUND_FX_SCRIPT if config.sound_enabled else ""),
         }
 
         # Add template-specific config

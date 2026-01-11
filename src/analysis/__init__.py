@@ -8,6 +8,7 @@ This module provides:
 
 from .game_analyzer import (
     GameAnalyzer,
+    GameAnalyzerSync,
     GameAnalysis,
     VisualStyle,
     AssetNeed,
@@ -19,6 +20,7 @@ from .models import (
 
 __all__ = [
     "GameAnalyzer",
+    "GameAnalyzerSync",
     "GameAnalysis",
     "VisualStyle",
     "AssetNeed",
