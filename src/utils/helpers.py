@@ -57,7 +57,7 @@ class Settings(BaseSettings):
 
     # Layer.ai API
     layer_api_url: str = Field(
-        default="https://api.app.layer.ai/v1/graphql",
+        default="https://api.app.layer.ai/graphql",
         description="Layer.ai GraphQL endpoint",
     )
     layer_api_key: str = Field(
