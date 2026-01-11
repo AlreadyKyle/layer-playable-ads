@@ -212,16 +212,15 @@ def _extract_error_message(error: Exception) -> str:
 # GraphQL Operations
 # =============================================================================
 
-# Note: These queries are based on Layer.ai's GraphQL API.
-# The actual schema may differ - these should be validated against the API sandbox.
+# Layer.ai GraphQL API - validated against actual schema
+# API endpoint: api.app.layer.ai
 
 QUERIES = {
-    "get_workspace": """
-        query GetWorkspaceUsage($workspaceId: ID!) {
-            getWorkspaceUsage(input: {workspaceId: $workspaceId, filtering: []}) {
+    "get_workspace_usage": """
+        query GetWorkspaceUsage($input: GetWorkspaceUsageInput!) {
+            getWorkspaceUsage(input: $input) {
                 __typename
                 ... on WorkspaceUsage {
-                    workspaceId
                     entitlement {
                         balance
                         hasAccess
@@ -235,69 +234,95 @@ QUERIES = {
         }
     """,
 
-    "get_generation_status": """
-        query GetGenerationStatus($taskId: ID!) {
-            generation(id: $taskId) {
-                id
-                status
-                result {
-                    imageUrl
-                    imageId
+    "get_inferences_by_id": """
+        query GetInferencesById($input: GetInferencesByIdInput!) {
+            getInferencesById(input: $input) {
+                __typename
+                ... on InferencesResult {
+                    inferences {
+                        id
+                        status
+                        errorCode
+                        files {
+                            id
+                            status
+                            thumbnails {
+                                url
+                            }
+                        }
+                    }
                 }
-                error {
+                ... on Error {
+                    code
                     message
                 }
             }
         }
     """,
 
-    "get_image": """
-        query GetImage($imageId: ID!) {
-            image(id: $imageId) {
-                id
-                url
-                width
-                height
-            }
-        }
-    """,
-
-    "get_style": """
-        query GetStyle($styleId: ID!) {
-            style(id: $styleId) {
-                id
-                name
-                prefix
-                technical
-                negative
-                createdAt
+    "get_style_by_id": """
+        query GetStyleById($input: GetStyleByIdInput!) {
+            getStyleById(input: $input) {
+                __typename
+                ... on Style {
+                    id
+                    name
+                    status
+                    type
+                }
+                ... on Error {
+                    code
+                    message
+                }
             }
         }
     """,
 
     "list_styles": """
-        query ListStyles($workspaceId: ID!, $limit: Int, $offset: Int) {
-            styles(workspaceId: $workspaceId, limit: $limit, offset: $offset) {
-                items {
-                    id
-                    name
-                    prefix
-                    technical
-                    negative
-                    createdAt
+        query ListStyles($input: ListStylesInput!) {
+            listStyles(input: $input) {
+                __typename
+                ... on StylesResult {
+                    styles {
+                        id
+                        name
+                        status
+                        type
+                    }
+                    pageInfo {
+                        hasNextPage
+                    }
                 }
-                total
+                ... on Error {
+                    code
+                    message
+                }
             }
         }
     """,
 }
 
 MUTATIONS = {
-    "generate_image": """
+    "generate_images": """
         mutation GenerateImages($input: GenerateImagesInput!) {
             generateImages(input: $input) {
-                taskId
-                status
+                __typename
+                ... on Inference {
+                    id
+                    status
+                    files {
+                        id
+                        status
+                        thumbnails {
+                            url
+                        }
+                    }
+                }
+                ... on Error {
+                    type
+                    code
+                    message
+                }
             }
         }
     """,
@@ -305,11 +330,16 @@ MUTATIONS = {
     "create_style": """
         mutation CreateStyle($input: CreateStyleInput!) {
             createStyle(input: $input) {
-                id
-                name
-                prefix
-                technical
-                negative
+                __typename
+                ... on Style {
+                    id
+                    name
+                    status
+                }
+                ... on Error {
+                    code
+                    message
+                }
             }
         }
     """,
@@ -425,8 +455,8 @@ class LayerClient:
 
         try:
             data = await self._execute(
-                QUERIES["get_workspace"],
-                {"workspaceId": self.workspace_id},
+                QUERIES["get_workspace_usage"],
+                {"input": {"workspaceId": self.workspace_id}},
             )
 
             usage_data = data.get("getWorkspaceUsage", {})
@@ -480,9 +510,9 @@ class LayerClient:
         prompt: str,
         style: Optional[StyleConfig] = None,
         reference_image_id: Optional[str] = None,
-    ) -> str:
+    ) -> GeneratedImage:
         """
-        Start an image generation task.
+        Generate an image using Layer.ai.
 
         Args:
             prompt: Text description of the image to generate
@@ -490,7 +520,7 @@ class LayerClient:
             reference_image_id: Optional reference image for style consistency
 
         Returns:
-            Task ID for polling status
+            GeneratedImage with result or status
         """
         # Build full prompt with style
         full_prompt = prompt
@@ -503,32 +533,65 @@ class LayerClient:
             has_reference=bool(reference_image_id),
         )
 
-        input_data = {
+        # Build input for Layer.ai API
+        input_data: dict[str, Any] = {
             "workspaceId": self.workspace_id,
-            "prompt": full_prompt,
+            "parameters": {
+                "prompt": full_prompt,
+            },
         }
 
         # Add negative prompt if style has one
         if style and style.to_negative_prompt():
-            input_data["negativePrompt"] = style.to_negative_prompt()
+            input_data["parameters"]["negativePrompt"] = style.to_negative_prompt()
 
         # Add reference image for style consistency
         ref_id = reference_image_id or (style.reference_image_id if style else None)
         if ref_id:
-            input_data["referenceImageId"] = ref_id
+            input_data["parameters"]["guidanceFiles"] = [{"fileId": ref_id}]
 
         try:
             data = await self._execute(
-                MUTATIONS["generate_image"],
+                MUTATIONS["generate_images"],
                 {"input": input_data},
             )
 
-            task_id = data.get("generateImages", {}).get("taskId")
-            if not task_id:
-                raise LayerAPIError("Failed to start generation: no task ID returned")
+            result = data.get("generateImages", {})
 
-            self._logger.info("Generation started", task_id=task_id)
-            return task_id
+            # Check for error response
+            if result.get("__typename") == "Error":
+                error_msg = result.get("message", "Unknown error")
+                raise LayerAPIError(f"Generation failed: {error_msg}")
+
+            # Extract inference data
+            inference_id = result.get("id")
+            status_str = result.get("status", "PENDING")
+            files = result.get("files", [])
+
+            # Map status
+            try:
+                status = GenerationStatus(status_str)
+            except ValueError:
+                status = GenerationStatus.PROCESSING
+
+            # Extract image URL from files if available
+            image_url = None
+            image_id = None
+            if files:
+                first_file = files[0]
+                image_id = first_file.get("id")
+                thumbnails = first_file.get("thumbnails", {})
+                image_url = thumbnails.get("url")
+
+            self._logger.info("Generation started", inference_id=inference_id, status=status_str)
+
+            return GeneratedImage(
+                task_id=inference_id or "",
+                status=status,
+                image_url=image_url,
+                image_id=image_id,
+                prompt=full_prompt,
+            )
 
         except LayerAPIError:
             raise
@@ -537,37 +600,75 @@ class LayerClient:
             self._logger.error("Generation failed", error=clean_msg)
             raise LayerAPIError(f"Generation failed: {clean_msg}")
 
-    async def get_generation_status(self, task_id: str) -> GeneratedImage:
+    async def get_generation_status(self, inference_id: str) -> GeneratedImage:
         """Get current status of a generation task."""
         try:
             data = await self._execute(
-                QUERIES["get_generation_status"],
-                {"taskId": task_id},
+                QUERIES["get_inferences_by_id"],
+                {"input": {"inferenceIds": [inference_id]}},
             )
 
-            gen_data = data.get("generation", {})
-            result_data = gen_data.get("result", {}) or {}
-            error_data = gen_data.get("error", {}) or {}
+            result = data.get("getInferencesById", {})
 
-            status_str = gen_data.get("status", "PENDING")
-            try:
-                status = GenerationStatus(status_str)
-            except ValueError:
-                status = GenerationStatus.PROCESSING
+            # Check for error response
+            if result.get("__typename") == "Error":
+                error_msg = result.get("message", "Unknown error")
+                return GeneratedImage(
+                    task_id=inference_id,
+                    status=GenerationStatus.FAILED,
+                    error_message=error_msg,
+                )
+
+            # Get first inference from result
+            inferences = result.get("inferences", [])
+            if not inferences:
+                return GeneratedImage(
+                    task_id=inference_id,
+                    status=GenerationStatus.PROCESSING,
+                )
+
+            inference = inferences[0]
+            status_str = inference.get("status", "PENDING")
+            error_code = inference.get("errorCode")
+            files = inference.get("files", [])
+
+            # Map Layer.ai status to our status
+            status_map = {
+                "PENDING": GenerationStatus.PENDING,
+                "PROCESSING": GenerationStatus.PROCESSING,
+                "COMPLETED": GenerationStatus.COMPLETED,
+                "FAILED": GenerationStatus.FAILED,
+                "CANCELLED": GenerationStatus.FAILED,
+            }
+            status = status_map.get(status_str, GenerationStatus.PROCESSING)
+
+            # Extract image URL from files
+            image_url = None
+            image_id = None
+            if files:
+                first_file = files[0]
+                image_id = first_file.get("id")
+                file_status = first_file.get("status")
+                thumbnails = first_file.get("thumbnails", {})
+                image_url = thumbnails.get("url") if thumbnails else None
+
+                # If file is completed, mark as completed
+                if file_status == "COMPLETED" and image_url:
+                    status = GenerationStatus.COMPLETED
 
             return GeneratedImage(
-                task_id=task_id,
+                task_id=inference_id,
                 status=status,
-                image_url=result_data.get("imageUrl"),
-                image_id=result_data.get("imageId"),
-                error_message=error_data.get("message"),
+                image_url=image_url,
+                image_id=image_id,
+                error_message=error_code,
             )
         except LayerAPIError:
             raise
         except Exception as e:
             # If we can't get status, return processing
             return GeneratedImage(
-                task_id=task_id,
+                task_id=inference_id,
                 status=GenerationStatus.PROCESSING,
                 error_message=str(e),
             )
@@ -625,8 +726,17 @@ class LayerClient:
         reference_image_id: Optional[str] = None,
     ) -> GeneratedImage:
         """Generate an image and wait for completion."""
-        task_id = await self.generate_image(prompt, style, reference_image_id)
-        result = await self.poll_generation(task_id)
+        initial_result = await self.generate_image(prompt, style, reference_image_id)
+
+        # If already completed (image URL present), return immediately
+        if initial_result.status == GenerationStatus.COMPLETED and initial_result.image_url:
+            return initial_result
+
+        # Otherwise poll for completion
+        if not initial_result.task_id:
+            raise LayerAPIError("Generation failed: no inference ID returned")
+
+        result = await self.poll_generation(initial_result.task_id)
         result.prompt = prompt
         return result
 
