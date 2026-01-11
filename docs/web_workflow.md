@@ -79,33 +79,30 @@ The app will open in a new browser tab, fully functional!
 
 ## Using the Application
 
-### The 4-Step Wizard
+### The 3-Step Wizard
 
-Once the app is running, you'll see a 4-step wizard:
+Once the app is running, you'll see a 3-step wizard:
 
-#### 1. Style Intelligence
-- Upload competitor screenshots (PNG, JPG, JPEG)
-- Or provide an App Store URL with screenshot
-- AI analyzes the visual style using Claude Vision
-- Extracts color palette, art style, and key elements
+#### 1. Select Style
+- Browse trained styles from your Layer.ai workspace
+- Only styles with status "COMPLETE" can be used
+- Manual style ID entry available as fallback
+- Link to create styles at [app.layer.ai](https://app.layer.ai)
 
-#### 2. Style Lock
-- Review the extracted style recipe
-- Edit prefix terms, technical terms, negative prompts
-- Lock the style and create it in Layer.ai
-- Deep link to view it in the Layer.ai dashboard
+**Prerequisite**: You must have trained styles in your Layer.ai workspace. Layer.ai requires pre-trained styles (LoRAs/checkpoints) for image generation.
 
-#### 3. Variant Forge
-- Select asset presets for your playable:
-  - **Hook** (3s): Characters, items
-  - **Gameplay** (15s): Backgrounds, game elements
-  - **CTA** (5s): Buttons, banners
-- Forge generates consistent assets using your locked style
-- Progress bar shows real-time status
+#### 2. Generate Assets
+- Select asset presets organized by the 3-15-5 timing model:
+  - **Hook (3s)**: Characters, items - grab attention
+  - **Gameplay (15s)**: Backgrounds, collectibles - engage user
+  - **CTA (5s)**: Buttons, banners - drive installs
+- Assets are generated using your selected Layer.ai style
+- Progress bar shows real-time generation status
 
-#### 4. Export & Preview
-- Configure playable settings (title, URL, dimensions)
-- Assemble into a single HTML file
+#### 3. Export Playable
+- Configure playable settings (title, store URLs, dimensions)
+- Select target ad networks (IronSource, Unity, AppLovin, Facebook, Google)
+- Assemble into a single MRAID 3.0 compliant HTML file
 - Download the final playable ad
 - Preview in browser
 - File size validation (< 5MB for ad networks)
@@ -143,16 +140,6 @@ Or manually access forwarded ports:
 
 ## File Management
 
-### Uploading Screenshots
-
-**Option 1: Drag & Drop**
-- Drag image files into the VS Code file explorer
-- They'll be uploaded to your Codespace
-
-**Option 2: Upload via Streamlit**
-- Use the file uploader in the app interface
-- Files are temporarily stored during the session
-
 ### Downloading Playables
 
 When you export a playable:
@@ -162,7 +149,7 @@ When you export a playable:
 
 ### Viewing Generated Assets
 
-Forged assets from Layer.ai are:
+Generated assets from Layer.ai are:
 - Displayed in the Streamlit interface
 - Referenced by URL (hosted by Layer.ai)
 - Embedded in the final playable as Base64
@@ -264,8 +251,8 @@ LOG_LEVEL=DEBUG
 
 ### Anthropic API
 
-- Claude Vision API calls are metered
-- Screenshot analysis: ~1-2 cents per request
+- Required for future vision-based style analysis features
+- Currently not actively used in the 3-step workflow
 - Monitor usage: [console.anthropic.com](https://console.anthropic.com)
 
 ---
