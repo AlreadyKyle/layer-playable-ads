@@ -304,18 +304,15 @@ QUERIES = {
     """,
 
     "list_styles": """
-        query ListStyles($input: ListStylesInput!) {
-            listStyles(input: $input) {
+        query GetWorkspaceStyles($input: GetWorkspaceStylesInput!) {
+            getWorkspaceStyles(input: $input) {
                 __typename
-                ... on StylesResult {
+                ... on StylesResponse {
                     styles {
                         id
                         name
                         status
                         type
-                    }
-                    pageInfo {
-                        hasNextPage
                     }
                 }
                 ... on Error {
@@ -880,7 +877,7 @@ class LayerClient:
                 },
             )
 
-            result = data.get("listStyles", {})
+            result = data.get("getWorkspaceStyles", {})
 
             if result.get("__typename") == "Error":
                 error_msg = result.get("message", "Unknown error")
