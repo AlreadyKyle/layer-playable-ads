@@ -290,9 +290,15 @@ class AssetGenerator:
         self._logger = logger.bind(component="AssetGenerator")
         self._current_style: Optional[StyleConfig] = None
         self._reference_image_id: Optional[str] = None
+        self._style_id: Optional[str] = None  # Layer.ai style ID (REQUIRED)
+
+    def set_style_id(self, style_id: str) -> None:
+        """Set the Layer.ai style ID (REQUIRED for generation)."""
+        self._style_id = style_id
+        self._logger.info("Layer.ai style ID set", style_id=style_id[:20] + "...")
 
     def set_style(self, style: StyleConfig) -> None:
-        """Set the style configuration for consistent generation."""
+        """Set the style configuration for prompt enhancement."""
         self._current_style = style
         self._logger.info("Style set", style_name=style.name)
 
@@ -354,18 +360,23 @@ class AssetGenerator:
         Returns:
             GeneratedAsset with image URL and metadata
         """
+        if not self._style_id:
+            raise ValueError("Layer.ai style_id is required. Call set_style_id() first.")
+
         style = custom_style or self._current_style
 
         self._logger.info(
             "Generating asset",
             asset_type=asset_type.value,
             category=category.value,
+            style_id=self._style_id[:20] + "..." if self._style_id else None,
             prompt_preview=prompt[:50],
         )
 
-        # Generate with Layer.ai
+        # Generate with Layer.ai (style_id is REQUIRED)
         result: GeneratedImage = self._client.generate_with_polling(
             prompt=prompt,
+            style_id=self._style_id,
             style=style,
             reference_image_id=self._reference_image_id,
         )

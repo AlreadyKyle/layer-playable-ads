@@ -504,6 +504,7 @@ class LayerClient:
     async def generate_image(
         self,
         prompt: str,
+        style_id: str,
         style: Optional[StyleConfig] = None,
         reference_image_id: Optional[str] = None,
     ) -> GeneratedImage:
@@ -512,13 +513,17 @@ class LayerClient:
 
         Args:
             prompt: Text description of the image to generate
-            style: Optional style configuration for consistency
+            style_id: REQUIRED Layer.ai style ID
+            style: Optional style configuration for prompt enhancement
             reference_image_id: Optional reference image for style consistency
 
         Returns:
             GeneratedImage with result or status
         """
-        # Build full prompt with style
+        if not style_id:
+            raise LayerAPIError("style_id is required for image generation")
+
+        # Build full prompt with style keywords if provided
         full_prompt = prompt
         if style:
             full_prompt = style.to_prompt_prefix() + prompt
@@ -526,24 +531,15 @@ class LayerClient:
         self._logger.info(
             "Starting image generation",
             prompt_preview=full_prompt[:80],
-            has_reference=bool(reference_image_id),
+            style_id=style_id,
         )
 
-        # Build input for Layer.ai API
-        # Note: prompt is at TOP LEVEL of GenerateImagesInput, not nested in parameters
+        # Build input for Layer.ai API - styleId is REQUIRED
         input_data: dict[str, Any] = {
             "workspaceId": self.workspace_id,
+            "styleId": style_id,
             "prompt": full_prompt,
         }
-
-        # Add optional style ID if available
-        if style and style.reference_image_id:
-            input_data["styleId"] = style.reference_image_id
-
-        # Add reference image for style consistency (via parameters)
-        ref_id = reference_image_id or (style.reference_image_id if style else None)
-        if ref_id:
-            input_data["parameters"] = {"guidanceFiles": [{"fileId": ref_id}]}
 
         try:
             data = await self._execute(
@@ -722,11 +718,12 @@ class LayerClient:
     async def generate_with_polling(
         self,
         prompt: str,
+        style_id: str,
         style: Optional[StyleConfig] = None,
         reference_image_id: Optional[str] = None,
     ) -> GeneratedImage:
         """Generate an image and wait for completion."""
-        initial_result = await self.generate_image(prompt, style, reference_image_id)
+        initial_result = await self.generate_image(prompt, style_id, style, reference_image_id)
 
         # If already completed (image URL present), return immediately
         if initial_result.status == GenerationStatus.COMPLETED and initial_result.image_url:
@@ -924,6 +921,7 @@ class LayerClientSync:
     def generate_with_polling(
         self,
         prompt: str,
+        style_id: str,
         style: Optional[StyleConfig] = None,
         reference_image_id: Optional[str] = None,
     ) -> GeneratedImage:
@@ -932,6 +930,7 @@ class LayerClientSync:
             self._execute_method(
                 "generate_with_polling",
                 prompt,
+                style_id,
                 style,
                 reference_image_id,
             )
