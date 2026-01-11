@@ -315,12 +315,14 @@ QUERIES = {
         query ListStyles($input: ListStylesInput!) {
             listStyles(input: $input) {
                 __typename
-                ... on StylesResponse {
-                    styles {
-                        id
-                        name
-                        status
-                        type
+                ... on StylesConnection {
+                    edges {
+                        node {
+                            id
+                            name
+                            status
+                            type
+                        }
                     }
                 }
                 ... on Error {
@@ -869,12 +871,14 @@ class LayerClient:
     async def list_styles(
         self,
         limit: int = 20,
+        status_filter: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
         """
-        List styles in the workspace.
+        List styles accessible to the authenticated user.
 
         Args:
             limit: Maximum number of styles to return
+            status_filter: Optional list of status values to filter by (e.g., ["COMPLETE"])
 
         Returns:
             List of style dicts with id, name, status, type
@@ -882,11 +886,14 @@ class LayerClient:
         self._logger.info("Listing styles", limit=limit, workspace_id=self.workspace_id)
 
         try:
-            # Try with empty input first - workspace comes from auth token
-            # If that fails, the GraphQL error will tell us what fields are needed
+            # ListStylesInput fields: topics, isFeatured, status, visibility, after, before, first, last
+            input_data: dict[str, Any] = {"first": limit}
+            if status_filter:
+                input_data["status"] = status_filter
+
             data = await self._execute(
                 QUERIES["list_styles"],
-                {"input": {}},
+                {"input": input_data},
             )
 
             result = data.get("listStyles", {})
@@ -895,7 +902,9 @@ class LayerClient:
                 error_msg = result.get("message", "Unknown error")
                 raise LayerAPIError(f"Failed to list styles: {error_msg}")
 
-            styles = result.get("styles", [])
+            # Extract styles from Relay-style edges/node structure
+            edges = result.get("edges", [])
+            styles = [edge.get("node") for edge in edges if edge.get("node")]
             self._logger.info("Styles listed", count=len(styles))
             return styles
 
@@ -1000,9 +1009,10 @@ class LayerClientSync:
     def list_styles(
         self,
         limit: int = 20,
+        status_filter: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
         """List workspace styles synchronously."""
-        return self._run(self._execute_method("list_styles", limit))
+        return self._run(self._execute_method("list_styles", limit, status_filter))
 
     def get_style_dashboard_url(self, style_id: str) -> str:
         """Get dashboard URL for a style."""
