@@ -10,9 +10,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
+- Vision-based style analysis (Claude Vision)
 - Batch playable generation
 - Style template library
 - Export format options (MRAID 2.0, VAST)
+
+---
+
+## [1.0.0] - 2025-01-11
+
+### Changed
+
+#### Architecture Redesign
+- **BREAKING**: Simplified from 4-step to 3-step wizard
+  - Removed Style Intel and Style Lock steps
+  - Layer.ai requires pre-trained styles, not extracted recipes
+  - New flow: Select Style → Generate Assets → Export Playable
+
+#### Layer.ai Integration (`layer_client.py`)
+- Fixed GraphQL schema to match actual API
+- `styleId` is now REQUIRED for `generateImages` mutation
+- Correct status enum values: `IN_PROGRESS`, `COMPLETE`, `FAILED`
+- Use `url` field on File type (not `signedUrl` or `thumbnails.url`)
+- `prompt` at top level of input (not nested in `parameters`)
+
+#### Performance Improvements
+- Added `@st.cache_data` for workspace info and styles fetch
+- Configurable `api_fetch_timeout` (default 15s) for initial loads
+- Show loading spinners during first API fetch
+
+#### Streamlit UI (`app.py`)
+- 3-step wizard:
+  1. Select Style (choose from Layer.ai workspace)
+  2. Generate Assets (hook, gameplay, CTA)
+  3. Export Playable (multi-network, MRAID 3.0)
+- Style selector showing only COMPLETE styles
+- Manual style ID entry as fallback
+
+### Added
+- `docs/layer_api_reference.md` - Complete Layer.ai API documentation
+- Multi-network export (IronSource, Unity, AppLovin, Facebook, Google)
+- Configurable `api_fetch_timeout` environment variable
+
+### Fixed
+- App loading hang (pulsing skeleton) on startup
+- GraphQL "Cannot query field 'url' on type 'FileThumbnails'" error
+- GraphQL "At least one style must be provided" error
+- Streamlit session state errors on widget interactions
 
 ---
 
@@ -96,6 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.0.0 | 2025-01-11 | Architecture redesign: 3-step wizard, Layer.ai API fixes |
 | 0.1.0 | 2025-01-06 | Initial MVP scaffold |
 
 ---

@@ -1,9 +1,9 @@
 # Technical Design Document
 ## Layer.ai Playable Studio (LPS)
 
-**Version**: 0.1.0
+**Version**: 1.0.0
 **Status**: MVP Implementation
-**Last Updated**: 2025-01-06
+**Last Updated**: 2025-01-11
 
 ---
 
@@ -67,60 +67,62 @@ LPS follows a modular monolith architecture with four primary modules:
 
 The central GraphQL client for all Layer.ai API interactions.
 
+**IMPORTANT**: Layer.ai requires pre-trained styles. The `styleId` parameter is REQUIRED for image generation.
+
 #### Class: `LayerClient`
 
 ```python
 class LayerClient:
     """Async GraphQL client for Layer.ai API."""
 
-    async def get_workspace_credits() -> WorkspaceCredits
-    async def create_style(recipe: StyleRecipe) -> str
-    async def get_style(style_id: str) -> dict
-    async def list_styles(limit: int, offset: int) -> tuple[list, int]
-    async def start_forge(style_id: str, prompt: str, ...) -> str
-    async def poll_forge_until_complete(task_id: str, ...) -> ForgeResult
-    async def forge_with_polling(style_id: str, prompt: str, ...) -> ForgeResult
+    async def get_workspace_info() -> WorkspaceInfo
+    async def check_credits() -> WorkspaceInfo
+    async def list_styles(limit: int) -> list[dict]
+    async def generate_image(prompt: str, style_id: str, ...) -> GeneratedImage
+    async def get_generation_status(inference_id: str) -> GeneratedImage
+    async def poll_generation(task_id: str, timeout: int) -> GeneratedImage
+    async def generate_with_polling(prompt: str, style_id: str, ...) -> GeneratedImage
 ```
 
 #### Class: `LayerClientSync`
 
-Synchronous wrapper for Streamlit compatibility (uses `asyncio.run()`).
+Synchronous wrapper for Streamlit compatibility (uses `asyncio.run()`). Accepts optional `timeout` parameter for initial API fetches.
 
 #### Key Data Classes
 
 ```python
 @dataclass
-class StyleRecipe:
-    style_name: str
-    prefix: list[str]
-    technical: list[str]
-    negative: list[str]
-    palette_primary: str
-    palette_accent: str
-    reference_image_id: Optional[str]
-
-@dataclass
-class ForgeResult:
+class GeneratedImage:
     task_id: str
-    status: ForgeTaskStatus
+    status: GenerationStatus  # PENDING, PROCESSING, COMPLETED, FAILED
     image_url: Optional[str]
     image_id: Optional[str]
     error_message: Optional[str]
     duration_seconds: float
+    prompt: str
 
 @dataclass
-class WorkspaceCredits:
-    available: int
-    used: int
-    total: int
+class WorkspaceInfo:
+    workspace_id: str
+    credits_available: int
+    has_access: bool
+
+@dataclass
+class StyleConfig:
+    name: str
+    description: str
+    style_keywords: list[str]
+    negative_keywords: list[str]
+    reference_image_id: Optional[str]
 ```
 
 #### Error Handling
 
 Custom exceptions for API errors:
-- `LayerClientError`: Base exception
+- `LayerAPIError`: Base exception
 - `InsufficientCreditsError`: Credits below threshold
-- `ForgeTimeoutError`: Polling timeout exceeded
+- `GenerationTimeoutError`: Polling timeout exceeded
+- `AuthenticationError`: API key or access issues
 
 #### Retry Logic
 
@@ -387,12 +389,12 @@ Streamlit session state tracks pipeline progress:
 
 ```python
 session_state = {
-    "current_step": 1,           # Wizard step (1-4)
-    "analysis_result": None,     # AnalysisResult from vision
-    "style_recipe": None,        # StyleRecipe (editable)
-    "managed_style": None,       # ManagedStyle from Layer.ai
-    "forge_session": None,       # ForgeSession with assets
-    "forged_assets": None,       # List of ForgedAsset
+    "current_step": 1,           # Wizard step (1-3)
+    "layer_style_id": None,      # Selected Layer.ai style ID
+    "layer_style_name": None,    # Style name for display
+    "style_config": None,        # StyleConfig for prompt enhancement
+    "asset_set": None,           # Generated assets (AssetSet)
+    "workspace_info": None,      # WorkspaceInfo with credits
     "playable_html": None,       # Assembled HTML string
     "playable_metadata": None,   # PlayableMetadata
 }
@@ -404,20 +406,41 @@ session_state = {
 
 ### 4.1 Layer.ai GraphQL Schema (Subset)
 
+For complete API documentation, see [layer_api_reference.md](layer_api_reference.md).
+
 #### Queries
 
 ```graphql
-query GetWorkspaceCredits($workspaceId: ID!) {
-    workspace(id: $workspaceId) {
-        credits { available, used, total }
+# Get workspace credits
+query GetWorkspaceUsage($input: GetWorkspaceUsageInput!) {
+    getWorkspaceUsage(input: $input) {
+        __typename
+        ... on WorkspaceUsage {
+            entitlement { balance, hasAccess }
+        }
+        ... on Error { code, message }
     }
 }
 
-query GetForgeTaskStatus($taskId: ID!) {
-    forgeTask(id: $taskId) {
-        status
-        result { imageUrl, imageId }
-        error { message }
+# List available styles (only COMPLETE styles can be used)
+query ListStyles($input: ListStylesInput!) {
+    listStyles(input: $input) {
+        __typename
+        ... on StylesResult {
+            styles { id, name, status, type }
+        }
+        ... on Error { code, message }
+    }
+}
+
+# Poll generation status
+query GetInferencesById($input: GetInferencesByIdInput!) {
+    getInferencesById(input: $input) {
+        __typename
+        ... on InferencesResult {
+            inferences { id, status, errorCode, files { id, status, url } }
+        }
+        ... on Error { code, message }
     }
 }
 ```
@@ -425,18 +448,21 @@ query GetForgeTaskStatus($taskId: ID!) {
 #### Mutations
 
 ```graphql
-mutation CreateStyle($input: CreateStyleInput!) {
-    createStyle(input: $input) {
-        id, name, prefix, technical, negative
-    }
-}
-
-mutation StartForge($input: ForgeInput!) {
-    forge(input: $input) {
-        taskId, status
+# Generate images (styleId is REQUIRED)
+mutation GenerateImages($input: GenerateImagesInput!) {
+    generateImages(input: $input) {
+        __typename
+        ... on Inference {
+            id
+            status
+            files { id, status, url }
+        }
+        ... on Error { type, code, message }
     }
 }
 ```
+
+**IMPORTANT**: The `styleId` field is REQUIRED even though the schema shows it as optional. The API returns "At least one style must be provided" without it.
 
 ### 4.2 Anthropic Claude API
 
@@ -467,11 +493,12 @@ response = client.messages.create(
 | LAYER_API_URL | No | https://api.app.layer.ai/v1/graphql | GraphQL endpoint |
 | LAYER_API_KEY | Yes | - | Layer.ai API key |
 | LAYER_WORKSPACE_ID | Yes | - | Workspace ID |
-| ANTHROPIC_API_KEY | Yes | - | Claude API key |
+| ANTHROPIC_API_KEY | Yes | - | Claude API key (for future vision features) |
 | CLAUDE_MODEL | No | claude-sonnet-4-20250514 | Vision model |
 | DEBUG | No | false | Debug mode |
 | LOG_LEVEL | No | INFO | Logging level |
-| FORGE_POLL_TIMEOUT | No | 60 | Max forge poll seconds |
+| FORGE_POLL_TIMEOUT | No | 60 | Max generation poll seconds |
+| API_FETCH_TIMEOUT | No | 15 | Max seconds for initial API fetches |
 | MIN_CREDITS_REQUIRED | No | 50 | Credit threshold |
 | MAX_PLAYABLE_SIZE_MB | No | 5.0 | Max export size |
 | MAX_IMAGE_DIMENSION | No | 512 | Max image pixels |
@@ -590,6 +617,7 @@ streamlit run src/app.py
 
 ### 10.1 Near-Term
 
+- [ ] Vision-based style analysis (Claude Vision integration)
 - [ ] Batch playable generation
 - [ ] Style template library
 - [ ] Enhanced error recovery

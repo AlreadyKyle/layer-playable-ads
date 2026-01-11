@@ -9,16 +9,17 @@ LPS transforms competitor game analysis into production-ready HTML5 playable ads
 ## Overview
 
 ```
-Screenshot → Style Recipe → Forged Assets → Playable Ad
-  (Input)     (Vision AI)    (Layer.ai)     (Phaser.js)
+Select Style → Generate Assets → Export Playable
+ (Layer.ai)      (Layer.ai)       (Phaser.js)
 ```
 
-LPS provides a 4-step wizard that:
+LPS provides a 3-step wizard:
 
-1. **Style Intel** - Analyzes competitor screenshots using Claude Vision
-2. **Style Lock** - Creates reusable styles in Layer.ai
-3. **Variant Forge** - Generates consistent asset variants
-4. **Export** - Assembles MRAID 3.0 compliant playable ads
+1. **Select Style** - Choose a trained style from your Layer.ai workspace
+2. **Generate Assets** - Create hook, gameplay, and CTA assets using Layer.ai
+3. **Export Playable** - Assemble MRAID 3.0 compliant HTML5 playable ads
+
+**Important**: Layer.ai requires pre-trained styles (LoRAs/checkpoints). You must create and train styles in your Layer.ai workspace before using this app.
 
 ---
 
@@ -184,36 +185,31 @@ ANTHROPIC_API_KEY=your_anthropic_api_key  # From console.anthropic.com
 
 ## Features
 
-### Vision Intelligence (Module A)
+### Style Selection
 
-- Analyze game screenshots via Claude Vision
-- Extract structured Style Recipes
-- Support for App Store page analysis
-- Color palette extraction
-
-### Automated Workflow (Module B)
-
-- Create styles via Layer.ai GraphQL API
+- Browse trained styles from your Layer.ai workspace
+- Filter by status (only COMPLETE styles can be used)
+- Manual style ID entry as fallback
 - Deep links to Layer.ai dashboard
-- Style versioning and tracking
 
-### Smart Forge (Module C)
+### Asset Generation
 
 - Credit guard (blocks if < 50 credits)
-- Reference image consistency
-- UA-optimized presets:
-  - Hook assets (characters, items)
-  - Gameplay assets (backgrounds, elements)
-  - CTA assets (buttons, banners)
-- Exponential backoff polling
+- Reference image consistency across all assets
+- UA-optimized presets organized by timing:
+  - **Hook (3s)**: Characters, items - grab attention
+  - **Gameplay (15s)**: Backgrounds, collectibles - engage user
+  - **CTA (5s)**: Buttons, banners - drive installs
+- Exponential backoff polling for generation status
 
-### Playable Assembly (Module D)
+### Playable Assembly
 
 - Phaser.js 3.70 game engine
-- MRAID 3.0 compliance
+- MRAID 3.0 compliance for ad networks
 - Responsive canvas scaling
-- Embedded Base64 assets
-- Single-file export (< 5MB)
+- Embedded Base64 assets (no external dependencies)
+- Single-file HTML export (< 5MB)
+- Multi-network export (IronSource, Unity, AppLovin, Facebook, Google)
 
 ---
 
@@ -271,42 +267,26 @@ layer-playable-ads/
 ### Layer.ai GraphQL
 
 ```python
-from src.layer_client import LayerClientSync, StyleRecipe
+from src.layer_client import LayerClientSync
 
 client = LayerClientSync()
 
-# Check credits
-credits = client.get_workspace_credits()
+# Get workspace info (includes credits)
+info = client.get_workspace_info()
+print(f"Credits: {info.credits_available}")
 
-# Create style
-recipe = StyleRecipe(
-    style_name="My Style",
-    prefix=["cartoon", "vibrant"],
-    technical=["cel-shaded"],
-    negative=["realistic"],
-    palette_primary="#FF6B6B",
-    palette_accent="#4ECDC4",
-)
-style_id = client.create_style(recipe)
+# List available styles (only COMPLETE styles can be used)
+styles = client.list_styles(limit=50)
+for style in styles:
+    if style["status"] == "COMPLETE":
+        print(f"{style['name']}: {style['id']}")
 
-# Forge asset
-result = client.forge_with_polling(
-    style_id=style_id,
+# Generate image with a trained style (styleId is REQUIRED)
+result = client.generate_with_polling(
     prompt="game character, dynamic pose",
+    style_id="your-trained-style-id",
 )
-```
-
-### Vision Analysis
-
-```python
-from src.vision import CompetitorSpy
-
-spy = CompetitorSpy()
-result = spy.analyze_screenshots(["screenshot.png"])
-
-print(result.recipe.style_name)
-print(result.genre)
-print(result.key_visual_elements)
+print(f"Generated: {result.image_url}")
 ```
 
 ### Playable Assembly
@@ -316,21 +296,22 @@ from src.playable import PlayableAssembler, PlayableConfig
 
 assembler = PlayableAssembler()
 
-# Prepare assets
-prepared = assembler.prepare_assets_from_set(forged_assets)
+# Prepare assets from generated asset set
+prepared = assembler.prepare_asset_set(asset_set)
 
 # Configure
 config = PlayableConfig(
     title="My Playable",
-    store_url="https://apps.apple.com/app/...",
+    store_url_ios="https://apps.apple.com/app/...",
+    store_url_android="https://play.google.com/store/apps/...",
 )
 
 # Assemble
 html, metadata = assembler.assemble(prepared, config)
-
-# Export
-assembler.export(html, Path("output/index.html"))
+print(f"Size: {metadata.file_size_formatted}")
 ```
+
+For complete API documentation, see [docs/layer_api_reference.md](docs/layer_api_reference.md).
 
 ---
 
@@ -371,14 +352,16 @@ mypy src/
 
 ### MVP (Current)
 
-- [x] Vision-based style extraction
-- [x] Layer.ai style creation
-- [x] Asset forging with presets
-- [x] Playable assembly
-- [x] Single-file export
+- [x] Style selection from Layer.ai workspace
+- [x] Asset generation with trained styles
+- [x] UA-optimized presets (3-15-5 timing)
+- [x] Playable assembly with Phaser.js
+- [x] Multi-network export
+- [x] Single-file HTML export
 
 ### Future
 
+- [ ] Vision-based style analysis (Claude Vision)
 - [ ] Batch playable generation
 - [ ] Style template library
 - [ ] A/B variant management
