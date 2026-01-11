@@ -362,11 +362,13 @@ class LayerClient:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ):
         settings = get_settings()
         self.api_url = api_url or settings.layer_api_url
         self.api_key = api_key or settings.layer_api_key
         self.workspace_id = workspace_id or settings.layer_workspace_id
+        self.timeout = timeout or 60.0  # Default 60s, but can be overridden
 
         self._client: Optional[httpx.AsyncClient] = None
         self._logger = logger.bind(component="LayerClient")
@@ -377,7 +379,7 @@ class LayerClient:
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=60.0,
+            timeout=self.timeout,
         )
         return self
 
@@ -893,10 +895,12 @@ class LayerClientSync:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ):
         self._api_url = api_url
         self._api_key = api_key
         self._workspace_id = workspace_id
+        self._timeout = timeout
 
     def _run(self, coro):
         """Run coroutine synchronously."""
@@ -908,6 +912,7 @@ class LayerClientSync:
             api_url=self._api_url,
             api_key=self._api_key,
             workspace_id=self._workspace_id,
+            timeout=self._timeout,
         ) as client:
             method = getattr(client, method_name)
             return await method(*args, **kwargs)

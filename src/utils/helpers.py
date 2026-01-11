@@ -104,6 +104,10 @@ class Settings(BaseSettings):
         default=60,
         description="Max seconds to poll forge task status",
     )
+    api_fetch_timeout: int = Field(
+        default=15,
+        description="Max seconds for initial API fetches (workspace info, styles list)",
+    )
     min_credits_required: int = Field(
         default=50,
         description="Minimum credits required to start forging",

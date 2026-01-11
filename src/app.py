@@ -12,6 +12,7 @@ MVP v1.0 - AI-powered playable ad generation workflow.
 import base64
 from pathlib import Path
 import tempfile
+from typing import Optional
 
 import streamlit as st
 
@@ -19,6 +20,7 @@ from src.layer_client import (
     LayerClientSync,
     StyleConfig,
     LayerAPIError,
+    WorkspaceInfo,
 )
 from src.forge.asset_forger import (
     AssetGenerator,
@@ -36,7 +38,41 @@ from src.playable.assembler import (
     GAMEPLAY_DURATION_MS,
     CTA_DURATION_MS,
 )
-from src.utils.helpers import validate_api_keys
+from src.utils.helpers import validate_api_keys, get_settings
+
+
+# =============================================================================
+# Cached API Functions (to prevent re-fetching on every render)
+# =============================================================================
+
+@st.cache_data(ttl=300, show_spinner="Connecting to Layer.ai...")  # Cache for 5 minutes
+def fetch_workspace_info() -> Optional[dict]:
+    """Fetch workspace info with caching. Returns dict for serialization."""
+    try:
+        settings = get_settings()
+        # Use shorter timeout for initial fetch to avoid long blocking
+        client = LayerClientSync(timeout=float(settings.api_fetch_timeout))
+        info = client.get_workspace_info()
+        return {
+            "workspace_id": info.workspace_id,
+            "credits_available": info.credits_available,
+            "has_access": info.has_access,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@st.cache_data(ttl=60, show_spinner="Loading styles from Layer.ai...")  # Cache for 1 minute
+def fetch_styles(limit: int = 50) -> dict:
+    """Fetch styles with caching. Returns dict for serialization."""
+    try:
+        settings = get_settings()
+        # Use shorter timeout for initial fetch to avoid long blocking
+        client = LayerClientSync(timeout=float(settings.api_fetch_timeout))
+        styles = client.list_styles(limit=limit)
+        return {"styles": styles, "error": None}
+    except Exception as e:
+        return {"styles": [], "error": str(e)}
 
 
 # =============================================================================
@@ -132,16 +168,15 @@ def render_sidebar():
         name = key.replace("_", " ").title()
         st.sidebar.text(f"{icon} {name}")
 
-    # Credits
+    # Credits (uses cached fetch to avoid blocking on every render)
     if all_keys_set:
-        try:
-            if st.session_state.workspace_info is None:
-                client = LayerClientSync()
-                st.session_state.workspace_info = client.get_workspace_info()
-            info = st.session_state.workspace_info
-            st.sidebar.metric("Credits", info.credits_available)
-        except Exception:
+        info = fetch_workspace_info()
+        if info and "error" not in info:
+            st.sidebar.metric("Credits", info.get("credits_available", "?"))
+        elif info and "error" in info:
             st.sidebar.text("Credits: Unable to fetch")
+        else:
+            st.sidebar.text("Credits: Loading...")
 
     # Workflow Progress
     st.sidebar.markdown("---")
@@ -195,21 +230,20 @@ def render_step_1():
     and training a custom style. Only trained (COMPLETE) styles can be used here.
     """)
 
-    # Fetch available styles
+    # Fetch available styles (cached to avoid re-fetching on every render)
     st.subheader("🎨 Available Styles")
 
-    available_styles = []
-    fetch_error = None
-
-    try:
-        client = LayerClientSync()
-        available_styles = client.list_styles(limit=50)
-    except Exception as e:
-        fetch_error = str(e)
+    # Use cached styles fetch
+    styles_data = fetch_styles(limit=50)
+    available_styles = styles_data.get("styles", [])
+    fetch_error = styles_data.get("error")
 
     if fetch_error:
         st.error(f"Could not fetch styles: {fetch_error}")
         st.write("Check your API keys and try again.")
+        if st.button("🔄 Retry"):
+            fetch_styles.clear()  # Clear cache to force re-fetch
+            st.rerun()
 
         # Manual fallback
         st.markdown("---")
@@ -246,6 +280,7 @@ def render_step_1():
         """)
 
         if st.button("🔄 Refresh Styles"):
+            fetch_styles.clear()  # Clear cache to force re-fetch
             st.rerun()
         return
 
