@@ -374,7 +374,7 @@ src/utils/helpers.py
 │  │  │  httpx.AsyncClient                           │   │    │
 │  │  │       │                                       │   │    │
 │  │  │       ▼                                       │   │    │
-│  │  │  POST /v1/graphql                            │   │    │
+│  │  │  POST /graphql                               │   │    │
 │  │  │       │                                       │   │    │
 │  │  │       ▼                                       │   │    │
 │  │  │  Retry (3x, exponential backoff)             │   │    │

@@ -1,14 +1,14 @@
 # Layer.ai API Reference
 
 **Last Updated**: 2025-01-11
-**API Endpoint**: `https://api.app.layer.ai/v1/graphql`
+**API Endpoint**: `https://api.app.layer.ai/graphql`
 **Authentication**: Bearer token via `Authorization` header
 
 ---
 
 ## Overview
 
-Layer.ai uses a GraphQL API. All operations require authentication with an API key and a workspace ID.
+Layer.ai uses a GraphQL API. All operations require authentication with a Personal Access Token (PAT).
 
 **CRITICAL**: Layer.ai generates images using **trained styles** (LoRAs/checkpoints). You cannot generate images with just text prompts - you must provide a `styleId` from a pre-trained style.
 
@@ -16,12 +16,16 @@ Layer.ai uses a GraphQL API. All operations require authentication with an API k
 
 ## Authentication
 
+Use a Personal Access Token (PAT) as a Bearer token:
+
 ```python
 headers = {
     "Authorization": f"Bearer {LAYER_API_KEY}",
     "Content-Type": "application/json",
 }
 ```
+
+Get your PAT at: [app.layer.ai](https://app.layer.ai) → Settings → API Keys
 
 ---
 
@@ -39,6 +43,11 @@ Styles are trained ML models that define the visual appearance of generated imag
 | `type` | StyleType | LAYER_TRAINED_CHECKPOINT, UPLOADED_CHECKPOINT, UPLOADED_LORA, MODEL_URL |
 
 **IMPORTANT**: Only styles with `status: "COMPLETE"` can be used for generation.
+
+**Style Types**:
+- `MODEL_URL` - Base AI models (FLUX, Kling, etc.) - may have generation restrictions
+- `LAYER_TRAINED_CHECKPOINT` - Custom styles you train with your images
+- `UPLOADED_CHECKPOINT` / `UPLOADED_LORA` - Models you upload
 
 ### Inferences (Image Generation)
 
@@ -70,21 +79,26 @@ Generated images are returned as File objects.
 
 ### List Styles
 
-Fetch available styles in a workspace.
+Fetch available styles. Returns a **Relay-style connection** with `edges/node` pattern.
+
+**IMPORTANT**: `StylesResponse` is a UNION type with `StylesConnection | Error`. Use `StylesConnection` (not `StylesResult`).
 
 ```graphql
 query ListStyles($input: ListStylesInput!) {
     listStyles(input: $input) {
         __typename
-        ... on StylesResult {
-            styles {
-                id
-                name
-                status
-                type
+        ... on StylesConnection {
+            edges {
+                node {
+                    id
+                    name
+                    status
+                    type
+                }
             }
             pageInfo {
                 hasNextPage
+                endCursor
             }
         }
         ... on Error {
@@ -99,11 +113,25 @@ query ListStyles($input: ListStylesInput!) {
 ```json
 {
     "input": {
-        "workspaceId": "your-workspace-id",
         "first": 50
     }
 }
 ```
+
+**ListStylesInput Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `first` | Int | Number of styles to fetch (pagination) |
+| `last` | Int | Fetch last N styles |
+| `after` | String | Cursor for forward pagination |
+| `before` | String | Cursor for backward pagination |
+| `status` | [StyleStatus] | Filter by status (e.g., ["COMPLETE"]) |
+| `visibility` | StyleVisibility | Filter by visibility |
+| `topics` | [String] | Filter by topics |
+| `isFeatured` | Boolean | Filter featured styles |
+
+**Note**: `workspaceId` is NOT required - styles are determined by your API token.
 
 ### Get Inference Status
 
@@ -137,25 +165,41 @@ query GetInferencesById($input: GetInferencesByIdInput!) {
 ```json
 {
     "input": {
-        "ids": ["inference-id-here"]
+        "inferenceIds": ["inference-id-here"]
     }
 }
 ```
 
-### Get Workspace Info
+**Note**: The field is `inferenceIds` (not `ids`).
+
+### Get Workspace Usage
 
 Check available credits.
 
 ```graphql
-query GetWorkspace($workspaceId: ID!) {
-    workspace(id: $workspaceId) {
-        id
-        name
-        credits {
-            available
-            used
-            total
+query GetWorkspaceUsage($input: GetWorkspaceUsageInput!) {
+    getWorkspaceUsage(input: $input) {
+        __typename
+        ... on WorkspaceUsage {
+            entitlement {
+                balance
+                hasAccess
+            }
         }
+        ... on Error {
+            code
+            message
+        }
+    }
+}
+```
+
+**Variables:**
+```json
+{
+    "input": {
+        "workspaceId": "your-workspace-id",
+        "filtering": []
     }
 }
 ```
@@ -231,20 +275,28 @@ CANCELLED    - Generation was cancelled
 DELETED      - Inference was deleted
 ```
 
+### StyleStatus
+
+```
+TRAINING     - Style is being trained
+COMPLETE     - Style is ready to use
+FAILED       - Style training failed
+```
+
 ### StyleType
 
 ```
 LAYER_TRAINED_CHECKPOINT  - Style trained by Layer.ai
 UPLOADED_CHECKPOINT       - User-uploaded checkpoint
 UPLOADED_LORA            - User-uploaded LoRA
-MODEL_URL                - External model URL
+MODEL_URL                - External model URL (base models like FLUX, Kling)
 ```
 
 ---
 
 ## Error Handling
 
-Layer.ai uses union types for responses. Always check `__typename`:
+Layer.ai uses **union types** for responses. Always check `__typename`:
 
 ```python
 result = data.get("generateImages", {})
@@ -262,10 +314,43 @@ inference_id = result.get("id")
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "At least one style must be provided" | Missing `styleId` | Always include `styleId` in input |
-| "Unknown type 'X'" | Wrong input type name | Check exact GraphQL type names |
+| "Oops! Our pixel wizards need a moment..." | Rate limit or server issue | Wait and retry |
+| "Cannot query field 'styles' on type 'StylesResponse'" | Wrong union type | Use `StylesConnection` with `edges/node` |
 | "Cannot query field 'X'" | Field doesn't exist | Verify field names via introspection |
 | HTTP 401 | Invalid API key | Check `LAYER_API_KEY` |
 | HTTP 403 | No workspace access | Check `LAYER_WORKSPACE_ID` |
+
+---
+
+## Relay Connection Pattern
+
+Layer.ai uses [Relay-style pagination](https://relay.dev/graphql/connections.htm) for list queries:
+
+```graphql
+... on StylesConnection {
+    edges {
+        node {
+            id
+            name
+            # ... other fields
+        }
+        cursor
+    }
+    pageInfo {
+        hasNextPage
+        hasPreviousPage
+        startCursor
+        endCursor
+    }
+}
+```
+
+**Parsing in Python:**
+```python
+result = data.get("listStyles", {})
+edges = result.get("edges", [])
+styles = [edge.get("node") for edge in edges if edge.get("node")]
+```
 
 ---
 
@@ -298,15 +383,17 @@ async def poll_generation(inference_id: str, timeout: float = 120.0):
 
 1. **Always check credits** before starting generation
 2. **Use trained styles only** - status must be "COMPLETE"
-3. **Poll with backoff** - start at 2s, increase to max 10s
-4. **Handle union types** - always check `__typename` in responses
-5. **Set reasonable timeouts** - generation typically takes 10-60 seconds
+3. **Prefer custom trained styles** - `MODEL_URL` types are base models and may have restrictions
+4. **Poll with backoff** - start at 2s, increase to max 10s
+5. **Handle union types** - always check `__typename` in responses
+6. **Set reasonable timeouts** - generation typically takes 10-60 seconds
+7. **Use Relay pagination** - extract data from `edges[].node`
 
 ---
 
 ## Introspection Queries
 
-Use these to explore the schema:
+Use these to explore the schema at `https://api.app.layer.ai/graphql`:
 
 ### Get type fields
 ```graphql
@@ -341,11 +428,60 @@ Use these to explore the schema:
 }
 ```
 
+### Check union types
+```graphql
+{
+    __type(name: "UnionTypeName") {
+        possibleTypes {
+            name
+            fields { name }
+        }
+    }
+}
+```
+
+---
+
+## Discovered Schema Details
+
+Through introspection, we found:
+
+### ListStylesInput
+```
+topics: [String]
+isFeatured: Boolean
+status: [StyleStatus]
+visibility: StyleVisibility
+after: String
+before: String
+first: Int
+last: Int
+```
+
+### StylesResponse (UNION)
+```
+possibleTypes:
+  - StylesConnection (has: pageInfo, edges)
+  - Error (has: type, code, title, message, data)
+```
+
+### GetInferencesByIdInput
+```
+inferenceIds: [ID!]!
+```
+
+### GetWorkspaceUsageInput
+```
+workspaceId: ID!
+filtering: [WorkspaceUsageFilter!]!
+```
+
 ---
 
 ## Limitations
 
 1. **No text-only generation** - Must have a trained style
 2. **Style training is async** - New styles take time to train
-3. **Rate limits apply** - Check with Layer.ai for limits
+3. **Rate limits apply** - "pixel wizards need to recharge" error indicates rate limiting
 4. **Credits consumed per generation** - Monitor workspace credits
+5. **MODEL_URL styles may have restrictions** - Custom trained styles are more reliable

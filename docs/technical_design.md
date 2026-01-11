@@ -423,11 +423,12 @@ query GetWorkspaceUsage($input: GetWorkspaceUsageInput!) {
 }
 
 # List available styles (only COMPLETE styles can be used)
+# Returns StylesConnection (Relay pattern) with edges/node
 query ListStyles($input: ListStylesInput!) {
     listStyles(input: $input) {
         __typename
-        ... on StylesResult {
-            styles { id, name, status, type }
+        ... on StylesConnection {
+            edges { node { id, name, status, type } }
         }
         ... on Error { code, message }
     }
@@ -490,7 +491,7 @@ response = client.messages.create(
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| LAYER_API_URL | No | https://api.app.layer.ai/v1/graphql | GraphQL endpoint |
+| LAYER_API_URL | No | https://api.app.layer.ai/graphql | GraphQL endpoint |
 | LAYER_API_KEY | Yes | - | Layer.ai API key |
 | LAYER_WORKSPACE_ID | Yes | - | Workspace ID |
 | ANTHROPIC_API_KEY | Yes | - | Claude API key (for future vision features) |
@@ -512,7 +513,7 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    layer_api_url: str = "https://api.app.layer.ai/v1/graphql"
+    layer_api_url: str = "https://api.app.layer.ai/graphql"
     layer_api_key: str
     layer_workspace_id: str
     anthropic_api_key: str
