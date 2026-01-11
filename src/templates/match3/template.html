@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>${TITLE}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background-color: ${BACKGROUND_COLOR};
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #game-container {
+            width: 100%; height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        canvas { display: block; max-width: 100%; max-height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <!-- Phaser 3 Engine (will be inlined for production) -->
+${PHASER_SCRIPT}
+
+    <!-- MRAID Detection -->
+    <script>
+        var mraid = window.mraid || null;
+        var isMRAID = !!mraid;
+        var isReady = false;
+
+        // Configuration (injected by assembler)
+        var CONFIG = {
+            storeUrl: '${STORE_URL}',
+            storeUrlIOS: '${STORE_URL_IOS}',
+            storeUrlAndroid: '${STORE_URL_ANDROID}',
+            hookDuration: ${HOOK_DURATION},
+            gameplayDuration: ${GAMEPLAY_DURATION},
+            ctaDuration: ${CTA_DURATION},
+            gameName: '${GAME_NAME}',
+            hookText: '${HOOK_TEXT}',
+            ctaText: '${CTA_TEXT}',
+            // Match-3 specific config
+            gridWidth: ${GRID_WIDTH},
+            gridHeight: ${GRID_HEIGHT},
+            tileTypes: ${TILE_TYPES},
+            matchMinimum: ${MATCH_MINIMUM},
+            backgroundColor: '${BACKGROUND_COLOR}'
+        };
+
+        // Asset manifest (Base64 data URIs)
+        var ASSETS = ${ASSET_MANIFEST};
+
+        function openStoreUrl() {
+            var url = CONFIG.storeUrl;
+            // Detect platform and use appropriate URL
+            var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+            if (isIOS && CONFIG.storeUrlIOS) {
+                url = CONFIG.storeUrlIOS;
+            } else if (CONFIG.storeUrlAndroid) {
+                url = CONFIG.storeUrlAndroid;
+            }
+
+            if (isMRAID && mraid.open) {
+                mraid.open(url);
+            } else {
+                window.open(url, '_blank');
+            }
+        }
+
+        function mraidReady() {
+            if (isMRAID) {
+                if (mraid.getState() === 'loading') {
+                    mraid.addEventListener('ready', function() {
+                        isReady = true;
+                        startGame();
+                    });
+                } else {
+                    isReady = true;
+                    startGame();
+                }
+            } else {
+                isReady = true;
+                startGame();
+            }
+        }
+
+        if (document.readyState === 'complete') {
+            mraidReady();
+        } else {
+            window.addEventListener('load', mraidReady);
+        }
+    </script>
+
+    <!-- Match-3 Game Logic -->
+    <script>
+        var game = null;
+
+        function startGame() {
+            if (game) return;
+
+            var config = {
+                type: Phaser.AUTO,
+                parent: 'game-container',
+                width: ${WIDTH},
+                height: ${HEIGHT},
+                backgroundColor: CONFIG.backgroundColor,
+                scale: {
+                    mode: Phaser.Scale.FIT,
+                    autoCenter: Phaser.Scale.CENTER_BOTH
+                },
+                scene: [BootScene, HookScene, Match3Scene, CTAScene]
+            };
+
+            game = new Phaser.Game(config);
+        }
+
+        // =====================================================================
+        // Boot Scene - Asset Loading
+        // =====================================================================
+        class BootScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'BootScene' });
+            }
+
+            preload() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+
+                // Loading bar
+                var progressBar = this.add.graphics();
+                var progressBox = this.add.graphics();
+                progressBox.fillStyle(0x222222, 0.8);
+                progressBox.fillRect(width / 4, height / 2 - 15, width / 2, 30);
+
+                this.load.on('progress', function(value) {
+                    progressBar.clear();
+                    progressBar.fillStyle(0x00ff00, 1);
+                    progressBar.fillRect(width / 4 + 5, height / 2 - 10, (width / 2 - 10) * value, 20);
+                });
+
+                this.load.on('complete', function() {
+                    progressBar.destroy();
+                    progressBox.destroy();
+                });
+
+                // Load tile assets
+                for (var key in ASSETS) {
+                    if (ASSETS.hasOwnProperty(key)) {
+                        this.load.image(key, ASSETS[key]);
+                    }
+                }
+            }
+
+            create() {
+                this.scene.start('HookScene');
+            }
+        }
+
+        // =====================================================================
+        // Hook Scene - 3 Second Attention Grabber
+        // =====================================================================
+        class HookScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'HookScene' });
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Background
+                if (ASSETS.background) {
+                    var bg = this.add.image(width / 2, height / 2, 'background');
+                    this.scaleToFill(bg, width, height);
+                }
+
+                // Animated tiles falling
+                var tileKeys = Object.keys(ASSETS).filter(function(k) {
+                    return k.startsWith('tile_');
+                });
+
+                if (tileKeys.length > 0) {
+                    for (var i = 0; i < 8; i++) {
+                        var delay = i * 150;
+                        var startX = Phaser.Math.Between(50, width - 50);
+                        var tileKey = tileKeys[i % tileKeys.length];
+
+                        this.time.delayedCall(delay, function(x, key) {
+                            var tile = self.add.image(x, -50, key);
+                            tile.setScale(0.8);
+
+                            self.tweens.add({
+                                targets: tile,
+                                y: height + 50,
+                                rotation: Phaser.Math.DegToRad(360),
+                                duration: 1500,
+                                ease: 'Bounce.easeOut'
+                            });
+                        }, [startX, tileKey], this);
+                    }
+                }
+
+                // Game title
+                var title = this.add.text(width / 2, height * 0.35, CONFIG.gameName, {
+                    fontSize: '36px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 6,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Bounce animation
+                this.tweens.add({
+                    targets: title,
+                    scaleX: 1.1,
+                    scaleY: 1.1,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: 2
+                });
+
+                // Hook text / instruction
+                var hookText = this.add.text(width / 2, height * 0.75, CONFIG.hookText || 'Tap to Play!', {
+                    fontSize: '28px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 4
+                }).setOrigin(0.5);
+
+                // Pulse animation
+                this.tweens.add({
+                    targets: hookText,
+                    alpha: 0.5,
+                    duration: 500,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Tap anywhere to skip
+                this.input.on('pointerdown', function() {
+                    self.scene.start('Match3Scene');
+                });
+
+                // Auto-transition after hook duration
+                this.time.delayedCall(CONFIG.hookDuration, function() {
+                    self.scene.start('Match3Scene');
+                });
+            }
+
+            scaleToFill(image, width, height) {
+                var scale = Math.max(width / image.width, height / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // Match-3 Scene - 15 Second Core Gameplay
+        // =====================================================================
+        class Match3Scene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'Match3Scene' });
+                this.grid = [];
+                this.tileSprites = [];
+                this.selectedTile = null;
+                this.score = 0;
+                this.canInteract = true;
+                this.tileSize = 50;
+                this.gridOffsetX = 0;
+                this.gridOffsetY = 0;
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Calculate tile size and grid position
+                var maxGridWidth = width * 0.9;
+                var maxGridHeight = height * 0.65;
+                this.tileSize = Math.min(
+                    maxGridWidth / CONFIG.gridWidth,
+                    maxGridHeight / CONFIG.gridHeight
+                );
+                var gridPixelWidth = this.tileSize * CONFIG.gridWidth;
+                var gridPixelHeight = this.tileSize * CONFIG.gridHeight;
+                this.gridOffsetX = (width - gridPixelWidth) / 2 + this.tileSize / 2;
+                this.gridOffsetY = height * 0.15 + this.tileSize / 2;
+
+                // Background
+                if (ASSETS.background) {
+                    var bg = this.add.image(width / 2, height / 2, 'background');
+                    this.scaleToFill(bg, width, height);
+                    bg.setAlpha(0.3);
+                }
+
+                // Grid background
+                var gridBg = this.add.graphics();
+                gridBg.fillStyle(0x000000, 0.3);
+                gridBg.fillRoundedRect(
+                    this.gridOffsetX - this.tileSize / 2 - 5,
+                    this.gridOffsetY - this.tileSize / 2 - 5,
+                    gridPixelWidth + 10,
+                    gridPixelHeight + 10,
+                    10
+                );
+
+                // Get tile keys
+                this.tileKeys = Object.keys(ASSETS).filter(function(k) {
+                    return k.startsWith('tile_');
+                });
+
+                // Fallback if no tile assets
+                if (this.tileKeys.length === 0) {
+                    this.tileKeys = ['fallback'];
+                    this.useFallbackTiles = true;
+                }
+
+                // Initialize grid with tiles
+                this.initializeGrid();
+
+                // Score display
+                this.scoreText = this.add.text(width / 2, height * 0.05, 'Score: 0', {
+                    fontSize: '24px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 3
+                }).setOrigin(0.5);
+
+                // Progress bar
+                this.progressBg = this.add.graphics();
+                this.progressBg.fillStyle(0x333333, 0.8);
+                this.progressBg.fillRect(width * 0.1, height - 25, width * 0.8, 10);
+                this.progressBar = this.add.graphics();
+
+                // Timer
+                var startTime = this.time.now;
+                this.time.addEvent({
+                    delay: 100,
+                    callback: function() {
+                        var elapsed = self.time.now - startTime;
+                        var progress = Math.min(elapsed / CONFIG.gameplayDuration, 1);
+
+                        self.progressBar.clear();
+                        self.progressBar.fillStyle(0x4CAF50, 1);
+                        self.progressBar.fillRect(width * 0.1, height - 25, (width * 0.8) * progress, 10);
+
+                        if (elapsed >= CONFIG.gameplayDuration) {
+                            self.scene.start('CTAScene', { score: self.score });
+                        }
+                    },
+                    loop: true
+                });
+
+                // Tutorial hint (first 2 seconds)
+                var hint = this.add.text(width / 2, height * 0.88, 'Swap tiles to match 3!', {
+                    fontSize: '18px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 2
+                }).setOrigin(0.5);
+
+                this.time.delayedCall(2000, function() {
+                    self.tweens.add({
+                        targets: hint,
+                        alpha: 0,
+                        duration: 500,
+                        onComplete: function() { hint.destroy(); }
+                    });
+                });
+            }
+
+            initializeGrid() {
+                this.grid = [];
+                this.tileSprites = [];
+
+                for (var row = 0; row < CONFIG.gridHeight; row++) {
+                    this.grid[row] = [];
+                    this.tileSprites[row] = [];
+
+                    for (var col = 0; col < CONFIG.gridWidth; col++) {
+                        // Keep generating until we don't have a match
+                        var tileType;
+                        do {
+                            tileType = Phaser.Math.Between(0, Math.min(this.tileKeys.length, CONFIG.tileTypes) - 1);
+                        } while (this.wouldMatch(row, col, tileType));
+
+                        this.grid[row][col] = tileType;
+                        this.createTileSprite(row, col, tileType);
+                    }
+                }
+            }
+
+            wouldMatch(row, col, tileType) {
+                // Check horizontal match (left)
+                if (col >= 2 &&
+                    this.grid[row][col - 1] === tileType &&
+                    this.grid[row][col - 2] === tileType) {
+                    return true;
+                }
+                // Check vertical match (up)
+                if (row >= 2 &&
+                    this.grid[row - 1] && this.grid[row - 1][col] === tileType &&
+                    this.grid[row - 2] && this.grid[row - 2][col] === tileType) {
+                    return true;
+                }
+                return false;
+            }
+
+            createTileSprite(row, col, tileType) {
+                var x = this.gridOffsetX + col * this.tileSize;
+                var y = this.gridOffsetY + row * this.tileSize;
+                var self = this;
+
+                var tile;
+                if (this.useFallbackTiles) {
+                    // Create colored circles as fallback
+                    var colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
+                    tile = this.add.circle(x, y, this.tileSize * 0.4, colors[tileType % colors.length]);
+                } else {
+                    tile = this.add.image(x, y, this.tileKeys[tileType]);
+                    var scale = (this.tileSize * 0.85) / Math.max(tile.width, tile.height);
+                    tile.setScale(scale);
+                }
+
+                tile.setInteractive();
+                tile.row = row;
+                tile.col = col;
+                tile.tileType = tileType;
+
+                tile.on('pointerdown', function() {
+                    if (self.canInteract) {
+                        self.selectTile(tile);
+                    }
+                });
+
+                this.tileSprites[row][col] = tile;
+                return tile;
+            }
+
+            selectTile(tile) {
+                if (!this.selectedTile) {
+                    // First selection
+                    this.selectedTile = tile;
+                    this.highlightTile(tile, true);
+                } else if (this.selectedTile === tile) {
+                    // Deselect
+                    this.highlightTile(tile, false);
+                    this.selectedTile = null;
+                } else {
+                    // Check if adjacent
+                    var rowDiff = Math.abs(this.selectedTile.row - tile.row);
+                    var colDiff = Math.abs(this.selectedTile.col - tile.col);
+
+                    if ((rowDiff === 1 && colDiff === 0) || (rowDiff === 0 && colDiff === 1)) {
+                        // Adjacent - try swap
+                        this.highlightTile(this.selectedTile, false);
+                        this.trySwap(this.selectedTile, tile);
+                    } else {
+                        // Not adjacent - new selection
+                        this.highlightTile(this.selectedTile, false);
+                        this.selectedTile = tile;
+                        this.highlightTile(tile, true);
+                    }
+                }
+            }
+
+            highlightTile(tile, highlight) {
+                if (highlight) {
+                    this.tweens.add({
+                        targets: tile,
+                        scaleX: tile.scaleX * 1.15,
+                        scaleY: tile.scaleY * 1.15,
+                        duration: 100
+                    });
+                } else {
+                    var targetScale = this.useFallbackTiles ? 1 :
+                        (this.tileSize * 0.85) / Math.max(tile.width / tile.scaleX, tile.height / tile.scaleY);
+                    this.tweens.add({
+                        targets: tile,
+                        scaleX: targetScale,
+                        scaleY: targetScale,
+                        duration: 100
+                    });
+                }
+            }
+
+            trySwap(tile1, tile2) {
+                var self = this;
+                this.canInteract = false;
+                this.selectedTile = null;
+
+                // Animate swap
+                var x1 = tile1.x, y1 = tile1.y;
+                var x2 = tile2.x, y2 = tile2.y;
+
+                this.tweens.add({
+                    targets: tile1,
+                    x: x2, y: y2,
+                    duration: 150,
+                    ease: 'Power2'
+                });
+
+                this.tweens.add({
+                    targets: tile2,
+                    x: x1, y: y1,
+                    duration: 150,
+                    ease: 'Power2',
+                    onComplete: function() {
+                        // Update grid
+                        var row1 = tile1.row, col1 = tile1.col;
+                        var row2 = tile2.row, col2 = tile2.col;
+
+                        self.grid[row1][col1] = tile2.tileType;
+                        self.grid[row2][col2] = tile1.tileType;
+                        self.tileSprites[row1][col1] = tile2;
+                        self.tileSprites[row2][col2] = tile1;
+
+                        tile1.row = row2; tile1.col = col2;
+                        tile2.row = row1; tile2.col = col1;
+
+                        // Check for matches
+                        var matches = self.findMatches();
+                        if (matches.length > 0) {
+                            self.clearMatches(matches);
+                        } else {
+                            // Swap back
+                            self.tweens.add({
+                                targets: tile1,
+                                x: x1, y: y1,
+                                duration: 150
+                            });
+                            self.tweens.add({
+                                targets: tile2,
+                                x: x2, y: y2,
+                                duration: 150,
+                                onComplete: function() {
+                                    // Restore grid
+                                    self.grid[row1][col1] = tile1.tileType;
+                                    self.grid[row2][col2] = tile2.tileType;
+                                    self.tileSprites[row1][col1] = tile1;
+                                    self.tileSprites[row2][col2] = tile2;
+                                    tile1.row = row1; tile1.col = col1;
+                                    tile2.row = row2; tile2.col = col2;
+                                    self.canInteract = true;
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+
+            findMatches() {
+                var matches = [];
+                var matchMin = CONFIG.matchMinimum || 3;
+
+                // Check horizontal matches
+                for (var row = 0; row < CONFIG.gridHeight; row++) {
+                    var matchLength = 1;
+                    for (var col = 1; col < CONFIG.gridWidth; col++) {
+                        if (this.grid[row][col] === this.grid[row][col - 1]) {
+                            matchLength++;
+                        } else {
+                            if (matchLength >= matchMin) {
+                                for (var i = col - matchLength; i < col; i++) {
+                                    matches.push({ row: row, col: i });
+                                }
+                            }
+                            matchLength = 1;
+                        }
+                    }
+                    if (matchLength >= matchMin) {
+                        for (var i = CONFIG.gridWidth - matchLength; i < CONFIG.gridWidth; i++) {
+                            matches.push({ row: row, col: i });
+                        }
+                    }
+                }
+
+                // Check vertical matches
+                for (var col = 0; col < CONFIG.gridWidth; col++) {
+                    var matchLength = 1;
+                    for (var row = 1; row < CONFIG.gridHeight; row++) {
+                        if (this.grid[row][col] === this.grid[row - 1][col]) {
+                            matchLength++;
+                        } else {
+                            if (matchLength >= matchMin) {
+                                for (var i = row - matchLength; i < row; i++) {
+                                    matches.push({ row: i, col: col });
+                                }
+                            }
+                            matchLength = 1;
+                        }
+                    }
+                    if (matchLength >= matchMin) {
+                        for (var i = CONFIG.gridHeight - matchLength; i < CONFIG.gridHeight; i++) {
+                            matches.push({ row: i, col: col });
+                        }
+                    }
+                }
+
+                // Remove duplicates
+                var seen = {};
+                return matches.filter(function(m) {
+                    var key = m.row + ',' + m.col;
+                    if (seen[key]) return false;
+                    seen[key] = true;
+                    return true;
+                });
+            }
+
+            clearMatches(matches) {
+                var self = this;
+                var pointsPerTile = 10;
+                var totalPoints = matches.length * pointsPerTile;
+                this.score += totalPoints;
+                this.scoreText.setText('Score: ' + this.score);
+
+                // Animate and remove matched tiles
+                matches.forEach(function(m) {
+                    var tile = self.tileSprites[m.row][m.col];
+                    if (tile) {
+                        // Pop effect
+                        self.tweens.add({
+                            targets: tile,
+                            scaleX: 0,
+                            scaleY: 0,
+                            alpha: 0,
+                            duration: 200,
+                            onComplete: function() {
+                                tile.destroy();
+                            }
+                        });
+
+                        // Score popup
+                        var popup = self.add.text(tile.x, tile.y, '+' + pointsPerTile, {
+                            fontSize: '16px',
+                            color: '#ffff00',
+                            stroke: '#000000',
+                            strokeThickness: 2
+                        }).setOrigin(0.5);
+
+                        self.tweens.add({
+                            targets: popup,
+                            y: popup.y - 30,
+                            alpha: 0,
+                            duration: 400,
+                            onComplete: function() { popup.destroy(); }
+                        });
+
+                        self.grid[m.row][m.col] = null;
+                        self.tileSprites[m.row][m.col] = null;
+                    }
+                });
+
+                // Drop tiles and fill
+                this.time.delayedCall(250, function() {
+                    self.dropTiles();
+                });
+            }
+
+            dropTiles() {
+                var self = this;
+                var dropAnimations = [];
+
+                // For each column, drop tiles down
+                for (var col = 0; col < CONFIG.gridWidth; col++) {
+                    var emptySpaces = 0;
+
+                    // Bottom to top
+                    for (var row = CONFIG.gridHeight - 1; row >= 0; row--) {
+                        if (this.grid[row][col] === null) {
+                            emptySpaces++;
+                        } else if (emptySpaces > 0) {
+                            // Move this tile down
+                            var newRow = row + emptySpaces;
+                            var tile = this.tileSprites[row][col];
+
+                            this.grid[newRow][col] = this.grid[row][col];
+                            this.grid[row][col] = null;
+                            this.tileSprites[newRow][col] = tile;
+                            this.tileSprites[row][col] = null;
+
+                            tile.row = newRow;
+
+                            var targetY = this.gridOffsetY + newRow * this.tileSize;
+                            dropAnimations.push({
+                                tile: tile,
+                                y: targetY
+                            });
+                        }
+                    }
+
+                    // Fill empty spaces at top
+                    for (var row = emptySpaces - 1; row >= 0; row--) {
+                        var tileType = Phaser.Math.Between(0, Math.min(this.tileKeys.length, CONFIG.tileTypes) - 1);
+                        this.grid[row][col] = tileType;
+
+                        // Create new tile above grid
+                        var startY = this.gridOffsetY - (emptySpaces - row) * this.tileSize;
+                        var tile = this.createTileSprite(row, col, tileType);
+                        tile.y = startY;
+
+                        var targetY = this.gridOffsetY + row * this.tileSize;
+                        dropAnimations.push({
+                            tile: tile,
+                            y: targetY
+                        });
+                    }
+                }
+
+                // Animate all drops
+                if (dropAnimations.length > 0) {
+                    var completed = 0;
+                    dropAnimations.forEach(function(anim) {
+                        self.tweens.add({
+                            targets: anim.tile,
+                            y: anim.y,
+                            duration: 200,
+                            ease: 'Bounce.easeOut',
+                            onComplete: function() {
+                                completed++;
+                                if (completed === dropAnimations.length) {
+                                    // Check for new matches
+                                    self.time.delayedCall(100, function() {
+                                        var newMatches = self.findMatches();
+                                        if (newMatches.length > 0) {
+                                            self.clearMatches(newMatches);
+                                        } else {
+                                            self.canInteract = true;
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    });
+                } else {
+                    this.canInteract = true;
+                }
+            }
+
+            scaleToFill(image, width, height) {
+                var scale = Math.max(width / image.width, height / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // CTA Scene - 5 Second Call to Action
+        // =====================================================================
+        class CTAScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'CTAScene' });
+            }
+
+            init(data) {
+                this.finalScore = data.score || 0;
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Dark overlay
+                this.cameras.main.setBackgroundColor('#1a1a2e');
+
+                // Celebration text
+                var congrats = this.add.text(width / 2, height * 0.2, 'Great Job!', {
+                    fontSize: '32px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Score display
+                var scoreText = this.add.text(width / 2, height * 0.32, 'Score: ' + this.finalScore, {
+                    fontSize: '28px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 3
+                }).setOrigin(0.5);
+
+                // Pulse animation
+                this.tweens.add({
+                    targets: scoreText,
+                    scaleX: 1.1,
+                    scaleY: 1.1,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: 2
+                });
+
+                // Game name / logo area
+                var logoY = height * 0.48;
+                var logo = this.add.text(width / 2, logoY, CONFIG.gameName, {
+                    fontSize: '36px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold',
+                    stroke: '#000000',
+                    strokeThickness: 4
+                }).setOrigin(0.5);
+
+                // CTA text
+                var ctaText = this.add.text(width / 2, height * 0.62, CONFIG.ctaText || 'Download FREE', {
+                    fontSize: '24px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff'
+                }).setOrigin(0.5);
+
+                // Install button
+                var buttonWidth = width * 0.7;
+                var buttonHeight = 60;
+                var buttonY = height * 0.78;
+
+                var button = this.add.graphics();
+                button.fillStyle(0x4CAF50, 1);
+                button.fillRoundedRect(
+                    width / 2 - buttonWidth / 2,
+                    buttonY - buttonHeight / 2,
+                    buttonWidth,
+                    buttonHeight,
+                    15
+                );
+
+                var buttonText = this.add.text(width / 2, buttonY, 'INSTALL NOW', {
+                    fontSize: '22px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Make interactive
+                var hitArea = this.add.rectangle(width / 2, buttonY, buttonWidth, buttonHeight, 0x000000, 0);
+                hitArea.setInteractive({ useHandCursor: true });
+
+                hitArea.on('pointerdown', function() {
+                    openStoreUrl();
+                });
+
+                // Button pulse
+                this.tweens.add({
+                    targets: [button, buttonText, hitArea],
+                    scaleX: 1.05,
+                    scaleY: 1.05,
+                    duration: 600,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Tap anywhere
+                this.input.on('pointerdown', function() {
+                    self.time.delayedCall(50, function() {
+                        openStoreUrl();
+                    });
+                });
+            }
+        }
+    </script>
+</body>
+</html>

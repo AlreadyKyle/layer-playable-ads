@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>${TITLE}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background-color: ${BACKGROUND_COLOR};
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #game-container {
+            width: 100%; height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        canvas { display: block; max-width: 100%; max-height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <!-- Phaser 3 Engine -->
+${PHASER_SCRIPT}
+
+    <!-- MRAID Detection -->
+    <script>
+        var mraid = window.mraid || null;
+        var isMRAID = !!mraid;
+        var isReady = false;
+
+        var CONFIG = {
+            storeUrl: '${STORE_URL}',
+            storeUrlIOS: '${STORE_URL_IOS}',
+            storeUrlAndroid: '${STORE_URL_ANDROID}',
+            hookDuration: ${HOOK_DURATION},
+            gameplayDuration: ${GAMEPLAY_DURATION},
+            ctaDuration: ${CTA_DURATION},
+            gameName: '${GAME_NAME}',
+            hookText: '${HOOK_TEXT}',
+            ctaText: '${CTA_TEXT}',
+            // Runner specific config
+            lanes: ${LANES},
+            speed: ${SPEED},
+            jumpHeight: ${JUMP_HEIGHT},
+            backgroundColor: '${BACKGROUND_COLOR}'
+        };
+
+        var ASSETS = ${ASSET_MANIFEST};
+
+        function openStoreUrl() {
+            var url = CONFIG.storeUrl;
+            var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+            if (isIOS && CONFIG.storeUrlIOS) {
+                url = CONFIG.storeUrlIOS;
+            } else if (CONFIG.storeUrlAndroid) {
+                url = CONFIG.storeUrlAndroid;
+            }
+            if (isMRAID && mraid.open) {
+                mraid.open(url);
+            } else {
+                window.open(url, '_blank');
+            }
+        }
+
+        function mraidReady() {
+            if (isMRAID) {
+                if (mraid.getState() === 'loading') {
+                    mraid.addEventListener('ready', function() {
+                        isReady = true;
+                        startGame();
+                    });
+                } else {
+                    isReady = true;
+                    startGame();
+                }
+            } else {
+                isReady = true;
+                startGame();
+            }
+        }
+
+        if (document.readyState === 'complete') {
+            mraidReady();
+        } else {
+            window.addEventListener('load', mraidReady);
+        }
+    </script>
+
+    <!-- Runner Game Logic -->
+    <script>
+        var game = null;
+
+        function startGame() {
+            if (game) return;
+
+            var config = {
+                type: Phaser.AUTO,
+                parent: 'game-container',
+                width: ${WIDTH},
+                height: ${HEIGHT},
+                backgroundColor: CONFIG.backgroundColor,
+                physics: {
+                    default: 'arcade',
+                    arcade: {
+                        gravity: { y: 800 },
+                        debug: false
+                    }
+                },
+                scale: {
+                    mode: Phaser.Scale.FIT,
+                    autoCenter: Phaser.Scale.CENTER_BOTH
+                },
+                scene: [BootScene, HookScene, RunnerScene, CTAScene]
+            };
+
+            game = new Phaser.Game(config);
+        }
+
+        // =====================================================================
+        // Boot Scene - Asset Loading
+        // =====================================================================
+        class BootScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'BootScene' });
+            }
+
+            preload() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+
+                var progressBar = this.add.graphics();
+                var progressBox = this.add.graphics();
+                progressBox.fillStyle(0x222222, 0.8);
+                progressBox.fillRect(width / 4, height / 2 - 15, width / 2, 30);
+
+                this.load.on('progress', function(value) {
+                    progressBar.clear();
+                    progressBar.fillStyle(0x00ff00, 1);
+                    progressBar.fillRect(width / 4 + 5, height / 2 - 10, (width / 2 - 10) * value, 20);
+                });
+
+                this.load.on('complete', function() {
+                    progressBar.destroy();
+                    progressBox.destroy();
+                });
+
+                for (var key in ASSETS) {
+                    if (ASSETS.hasOwnProperty(key)) {
+                        this.load.image(key, ASSETS[key]);
+                    }
+                }
+            }
+
+            create() {
+                this.scene.start('HookScene');
+            }
+        }
+
+        // =====================================================================
+        // Hook Scene - 3 Second Attention Grabber
+        // =====================================================================
+        class HookScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'HookScene' });
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Background
+                if (ASSETS.background) {
+                    var bg = this.add.image(width / 2, height / 2, 'background');
+                    this.scaleToFill(bg, width, height);
+                }
+
+                // Player character running animation (simulated)
+                var playerY = height * 0.7;
+                var player;
+
+                if (ASSETS.player) {
+                    player = this.add.image(width * 0.3, playerY, 'player');
+                    var scale = (height * 0.2) / Math.max(player.width, player.height);
+                    player.setScale(scale);
+                } else {
+                    player = this.add.rectangle(width * 0.3, playerY, 50, 80, 0x3498db);
+                }
+
+                // Bobbing animation (running effect)
+                this.tweens.add({
+                    targets: player,
+                    y: playerY - 10,
+                    duration: 150,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Scrolling obstacles
+                var obstacleX = width + 50;
+                for (var i = 0; i < 3; i++) {
+                    var obstacle;
+                    if (ASSETS.obstacle) {
+                        obstacle = this.add.image(obstacleX + i * 150, playerY + 10, 'obstacle');
+                        obstacle.setScale(0.5);
+                    } else {
+                        obstacle = this.add.rectangle(obstacleX + i * 150, playerY + 10, 40, 60, 0xe74c3c);
+                    }
+
+                    this.tweens.add({
+                        targets: obstacle,
+                        x: -50,
+                        duration: 2000,
+                        repeat: -1
+                    });
+                }
+
+                // Title
+                var title = this.add.text(width / 2, height * 0.25, CONFIG.gameName, {
+                    fontSize: '32px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 5,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Hook text
+                var hookText = this.add.text(width / 2, height * 0.4, CONFIG.hookText || 'Tap to Jump!', {
+                    fontSize: '24px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 3
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: hookText,
+                    alpha: 0.5,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Tap to start
+                this.input.on('pointerdown', function() {
+                    self.scene.start('RunnerScene');
+                });
+
+                this.time.delayedCall(CONFIG.hookDuration, function() {
+                    self.scene.start('RunnerScene');
+                });
+            }
+
+            scaleToFill(image, width, height) {
+                var scale = Math.max(width / image.width, height / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // Runner Scene - 15 Second Core Gameplay
+        // =====================================================================
+        class RunnerScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'RunnerScene' });
+                this.score = 0;
+                this.isJumping = false;
+                this.gameSpeed = 5;
+                this.laneWidth = 0;
+                this.lanes = [];
+                this.currentLane = 1;
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                this.gameSpeed = CONFIG.speed || 5;
+                var numLanes = CONFIG.lanes || 3;
+                this.laneWidth = width / numLanes;
+
+                // Calculate lane positions
+                this.lanes = [];
+                for (var i = 0; i < numLanes; i++) {
+                    this.lanes.push(this.laneWidth / 2 + i * this.laneWidth);
+                }
+                this.currentLane = Math.floor(numLanes / 2);
+
+                // Ground level
+                this.groundY = height * 0.85;
+
+                // Background (scrolling)
+                this.bgTiles = [];
+                if (ASSETS.background) {
+                    for (var i = 0; i < 3; i++) {
+                        var bg = this.add.image(width * i, height / 2, 'background');
+                        this.scaleToFill(bg, width, height);
+                        bg.setAlpha(0.6);
+                        this.bgTiles.push(bg);
+                    }
+                }
+
+                // Ground
+                this.ground = this.add.rectangle(width / 2, this.groundY + 20, width, 40, 0x8B4513);
+
+                // Player
+                var playerX = this.lanes[this.currentLane];
+                if (ASSETS.player) {
+                    this.player = this.physics.add.image(playerX, this.groundY - 40, 'player');
+                    var scale = (height * 0.15) / Math.max(this.player.width, this.player.height);
+                    this.player.setScale(scale);
+                } else {
+                    this.player = this.physics.add.image(playerX, this.groundY - 40, '__DEFAULT');
+                    this.player.setVisible(false);
+                    this.playerRect = this.add.rectangle(playerX, this.groundY - 40, 40, 70, 0x3498db);
+                }
+
+                this.player.setCollideWorldBounds(true);
+                this.player.body.setGravityY(600);
+
+                // Obstacles group
+                this.obstacles = this.physics.add.group();
+                this.collectibles = this.physics.add.group();
+
+                // Spawn obstacles periodically
+                this.time.addEvent({
+                    delay: 1200,
+                    callback: this.spawnObstacle,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                // Spawn collectibles
+                this.time.addEvent({
+                    delay: 800,
+                    callback: this.spawnCollectible,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                // Score
+                this.scoreText = this.add.text(width / 2, 30, 'Score: 0', {
+                    fontSize: '24px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 3
+                }).setOrigin(0.5);
+
+                // Progress bar
+                this.progressBg = this.add.graphics();
+                this.progressBg.fillStyle(0x333333, 0.8);
+                this.progressBg.fillRect(width * 0.1, height - 20, width * 0.8, 8);
+                this.progressBar = this.add.graphics();
+
+                // Timer
+                var startTime = this.time.now;
+                this.time.addEvent({
+                    delay: 100,
+                    callback: function() {
+                        var elapsed = self.time.now - startTime;
+                        var progress = Math.min(elapsed / CONFIG.gameplayDuration, 1);
+
+                        self.progressBar.clear();
+                        self.progressBar.fillStyle(0x4CAF50, 1);
+                        self.progressBar.fillRect(width * 0.1, height - 20, (width * 0.8) * progress, 8);
+
+                        // Increase speed over time
+                        self.gameSpeed = (CONFIG.speed || 5) + (elapsed / CONFIG.gameplayDuration) * 3;
+
+                        if (elapsed >= CONFIG.gameplayDuration) {
+                            self.scene.start('CTAScene', { score: self.score });
+                        }
+                    },
+                    loop: true
+                });
+
+                // Controls - Swipe left/right, Tap to jump
+                var startX = 0;
+                this.input.on('pointerdown', function(pointer) {
+                    startX = pointer.x;
+
+                    // Jump on tap (if not swiping)
+                    if (self.player.body.touching.down || self.player.y >= self.groundY - 50) {
+                        self.jump();
+                    }
+                });
+
+                this.input.on('pointerup', function(pointer) {
+                    var swipeThreshold = 50;
+                    var dx = pointer.x - startX;
+
+                    if (dx > swipeThreshold && self.currentLane < self.lanes.length - 1) {
+                        self.changeLane(1);
+                    } else if (dx < -swipeThreshold && self.currentLane > 0) {
+                        self.changeLane(-1);
+                    }
+                });
+
+                // Collision detection
+                this.physics.add.overlap(this.player, this.obstacles, this.hitObstacle, null, this);
+                this.physics.add.overlap(this.player, this.collectibles, this.collectItem, null, this);
+
+                // Tutorial hint
+                var hint = this.add.text(width / 2, height * 0.5, 'Swipe ← → to dodge\nTap to jump!', {
+                    fontSize: '18px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 2,
+                    align: 'center'
+                }).setOrigin(0.5);
+
+                this.time.delayedCall(2000, function() {
+                    self.tweens.add({
+                        targets: hint,
+                        alpha: 0,
+                        duration: 500,
+                        onComplete: function() { hint.destroy(); }
+                    });
+                });
+            }
+
+            update() {
+                // Keep player on ground
+                if (this.player.y > this.groundY - 40) {
+                    this.player.y = this.groundY - 40;
+                    this.player.body.setVelocityY(0);
+                    this.isJumping = false;
+                }
+
+                // Sync player rect if using fallback
+                if (this.playerRect) {
+                    this.playerRect.x = this.player.x;
+                    this.playerRect.y = this.player.y;
+                }
+
+                // Scroll background
+                if (this.bgTiles.length > 0) {
+                    var width = this.cameras.main.width;
+                    this.bgTiles.forEach(function(bg) {
+                        bg.x -= 1;
+                        if (bg.x <= -width / 2) {
+                            bg.x = width * 2 - width / 2;
+                        }
+                    });
+                }
+
+                // Move obstacles and collectibles
+                var self = this;
+                this.obstacles.getChildren().forEach(function(obstacle) {
+                    obstacle.y += self.gameSpeed;
+                    if (obstacle.y > self.cameras.main.height + 50) {
+                        obstacle.destroy();
+                        self.score += 5;
+                        self.scoreText.setText('Score: ' + self.score);
+                    }
+                });
+
+                this.collectibles.getChildren().forEach(function(item) {
+                    item.y += self.gameSpeed;
+                    if (item.y > self.cameras.main.height + 50) {
+                        item.destroy();
+                    }
+                });
+            }
+
+            jump() {
+                if (!this.isJumping) {
+                    this.isJumping = true;
+                    var jumpVelocity = -(CONFIG.jumpHeight || 400);
+                    this.player.body.setVelocityY(jumpVelocity);
+                }
+            }
+
+            changeLane(direction) {
+                this.currentLane += direction;
+                this.currentLane = Phaser.Math.Clamp(this.currentLane, 0, this.lanes.length - 1);
+
+                this.tweens.add({
+                    targets: this.player,
+                    x: this.lanes[this.currentLane],
+                    duration: 100,
+                    ease: 'Power2'
+                });
+
+                if (this.playerRect) {
+                    this.tweens.add({
+                        targets: this.playerRect,
+                        x: this.lanes[this.currentLane],
+                        duration: 100,
+                        ease: 'Power2'
+                    });
+                }
+            }
+
+            spawnObstacle() {
+                var lane = Phaser.Math.Between(0, this.lanes.length - 1);
+                var x = this.lanes[lane];
+                var y = -50;
+
+                var obstacle;
+                if (ASSETS.obstacle) {
+                    obstacle = this.obstacles.create(x, y, 'obstacle');
+                    obstacle.setScale(0.6);
+                } else {
+                    obstacle = this.obstacles.create(x, y, '__DEFAULT');
+                    obstacle.setVisible(false);
+                    var rect = this.add.rectangle(x, y, 40, 50, 0xe74c3c);
+                    obstacle.rect = rect;
+                }
+
+                obstacle.body.setAllowGravity(false);
+                obstacle.body.setImmovable(true);
+            }
+
+            spawnCollectible() {
+                var lane = Phaser.Math.Between(0, this.lanes.length - 1);
+                var x = this.lanes[lane];
+                var y = -30;
+
+                var item;
+                if (ASSETS.collectible) {
+                    item = this.collectibles.create(x, y, 'collectible');
+                    item.setScale(0.5);
+                } else {
+                    item = this.collectibles.create(x, y, '__DEFAULT');
+                    item.setVisible(false);
+                    var circle = this.add.circle(x, y, 15, 0xf1c40f);
+                    item.circle = circle;
+                }
+
+                item.body.setAllowGravity(false);
+            }
+
+            hitObstacle(player, obstacle) {
+                // Flash effect
+                this.cameras.main.shake(100, 0.01);
+
+                obstacle.destroy();
+                if (obstacle.rect) obstacle.rect.destroy();
+
+                this.score = Math.max(0, this.score - 10);
+                this.scoreText.setText('Score: ' + this.score);
+            }
+
+            collectItem(player, item) {
+                // Collect effect
+                var popup = this.add.text(item.x, item.y, '+10', {
+                    fontSize: '16px',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 2
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: popup,
+                    y: popup.y - 30,
+                    alpha: 0,
+                    duration: 400,
+                    onComplete: function() { popup.destroy(); }
+                });
+
+                item.destroy();
+                if (item.circle) item.circle.destroy();
+
+                this.score += 10;
+                this.scoreText.setText('Score: ' + this.score);
+            }
+
+            scaleToFill(image, width, height) {
+                var scale = Math.max(width / image.width, height / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // CTA Scene
+        // =====================================================================
+        class CTAScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'CTAScene' });
+            }
+
+            init(data) {
+                this.finalScore = data.score || 0;
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                this.cameras.main.setBackgroundColor('#1a1a2e');
+
+                var congrats = this.add.text(width / 2, height * 0.18, 'Amazing Run!', {
+                    fontSize: '30px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                var scoreText = this.add.text(width / 2, height * 0.30, 'Score: ' + this.finalScore, {
+                    fontSize: '26px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 3
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: scoreText,
+                    scaleX: 1.1,
+                    scaleY: 1.1,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: 2
+                });
+
+                var logo = this.add.text(width / 2, height * 0.48, CONFIG.gameName, {
+                    fontSize: '34px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold',
+                    stroke: '#000000',
+                    strokeThickness: 4
+                }).setOrigin(0.5);
+
+                var ctaText = this.add.text(width / 2, height * 0.62, CONFIG.ctaText || 'Keep Running!', {
+                    fontSize: '22px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff'
+                }).setOrigin(0.5);
+
+                var buttonWidth = width * 0.7;
+                var buttonHeight = 55;
+                var buttonY = height * 0.78;
+
+                var button = this.add.graphics();
+                button.fillStyle(0x4CAF50, 1);
+                button.fillRoundedRect(
+                    width / 2 - buttonWidth / 2,
+                    buttonY - buttonHeight / 2,
+                    buttonWidth,
+                    buttonHeight,
+                    15
+                );
+
+                var buttonText = this.add.text(width / 2, buttonY, 'INSTALL NOW', {
+                    fontSize: '20px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                var hitArea = this.add.rectangle(width / 2, buttonY, buttonWidth, buttonHeight, 0x000000, 0);
+                hitArea.setInteractive({ useHandCursor: true });
+
+                hitArea.on('pointerdown', function() {
+                    openStoreUrl();
+                });
+
+                this.tweens.add({
+                    targets: [button, buttonText, hitArea],
+                    scaleX: 1.05,
+                    scaleY: 1.05,
+                    duration: 600,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                this.input.on('pointerdown', function() {
+                    self.time.delayedCall(50, function() {
+                        openStoreUrl();
+                    });
+                });
+            }
+        }
+    </script>
+</body>
+</html>

@@ -10,10 +10,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Vision-based style analysis (Claude Vision)
+- More game mechanics (merger, puzzle, shooter)
+- Dynamic game generation with Claude
 - Batch playable generation
-- Style template library
-- Export format options (MRAID 2.0, VAST)
+- A/B variant management
+
+---
+
+## [2.0.0] - 2026-01-11
+
+### Major Architecture Overhaul
+
+This release completely reimagines the playable ad generator to create **game-specific** playables instead of generic templates.
+
+### Added
+
+#### Claude Vision Game Analysis (`src/analysis/`)
+- `GameAnalyzerSync` - Analyzes game screenshots to detect mechanics and style
+- Automatic mechanic detection: match-3, runner, tapper, merger, puzzle, shooter
+- Visual style extraction: art type, colors, theme, mood
+- Confidence scoring for mechanic classification
+- Hook and CTA text suggestions
+
+#### Game-Specific Templates (`src/templates/`)
+- **Match-3 Template**: Full grid-based tile matching gameplay
+  - Swap mechanics, match detection, cascading
+  - 7x9 configurable grid, 4+ tile types
+- **Runner Template**: Lane-based endless runner
+  - 3-lane swipe controls, jump mechanic
+  - Obstacles, collectibles, speed progression
+- **Tapper Template**: Idle/clicker gameplay
+  - Tap accumulation, multiplier system
+  - Bonus spawning, score formatting
+- Template registry system (`registry.py`)
+- Fallback graphics for demo mode (colored shapes)
+
+#### Unified Pipeline (`src/playable_factory.py`)
+- `PlayableFactory` - Single entry point for all playable creation
+- `create_from_screenshots()` - Full pipeline from images to playable
+- `create_demo()` - Demo mode without API calls
+- `PlayableOutput` - Rich result object with save methods
+
+#### Sound Effects (`src/generation/sound_generator.py`)
+- Procedural Web Audio API sounds
+- Game-specific sound integration
+- No external audio files required
+
+#### Demo Mode
+- Test playable output without API keys
+- Sidebar quick demo generator
+- Fallback graphics in templates
+
+### Changed
+
+#### New 4-Step Workflow
+1. **Input Game** - Upload 1-5 screenshots
+2. **Analyze & Review** - Claude Vision analysis with override options
+3. **Generate Assets** - Layer.ai with game-specific prompts
+4. **Export Playable** - Build, preview, download
+
+#### Project Structure
+```
+src/
+├── analysis/           # NEW: Claude Vision analysis
+├── generation/         # NEW: Asset and game generation
+├── assembly/           # NEW: Template assembly
+├── templates/          # NEW: Phaser.js game templates
+│   ├── match3/
+│   ├── runner/
+│   └── tapper/
+├── playable_factory.py # NEW: Unified pipeline
+└── app.py              # Replaced with v2 workflow
+```
+
+#### Archived Modules
+Old modules moved to `src/_archive/`:
+- `vision/competitor_spy.py` → replaced by `analysis/game_analyzer.py`
+- `forge/asset_forger.py` → replaced by `generation/game_asset_generator.py`
+- `workflow/style_manager.py` → functionality moved to factory
+
+### Technical Decisions
+- Template-based approach: Pre-built Phaser.js games, not generated code
+- Fallback graphics: Templates work without assets for demo mode
+- Procedural sounds: Web Audio API, no file dependencies
+- Single pipeline: PlayableFactory orchestrates all components
 
 ---
 
@@ -140,6 +220,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 2.0.0 | 2026-01-11 | Game-specific playables: Claude Vision analysis, template library, demo mode |
 | 1.0.0 | 2025-01-11 | Architecture redesign: 3-step wizard, Layer.ai API fixes |
 | 0.1.0 | 2025-01-06 | Initial MVP scaffold |
 

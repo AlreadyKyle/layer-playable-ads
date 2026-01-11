@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>${TITLE}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background-color: ${BACKGROUND_COLOR};
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        #game-container {
+            width: 100%; height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        canvas { display: block; max-width: 100%; max-height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <!-- Phaser 3 Engine -->
+${PHASER_SCRIPT}
+
+    <!-- MRAID Detection -->
+    <script>
+        var mraid = window.mraid || null;
+        var isMRAID = !!mraid;
+        var isReady = false;
+
+        var CONFIG = {
+            storeUrl: '${STORE_URL}',
+            storeUrlIOS: '${STORE_URL_IOS}',
+            storeUrlAndroid: '${STORE_URL_ANDROID}',
+            hookDuration: ${HOOK_DURATION},
+            gameplayDuration: ${GAMEPLAY_DURATION},
+            ctaDuration: ${CTA_DURATION},
+            gameName: '${GAME_NAME}',
+            hookText: '${HOOK_TEXT}',
+            ctaText: '${CTA_TEXT}',
+            // Tapper specific config
+            pointsPerTap: ${POINTS_PER_TAP},
+            bonusThreshold: ${BONUS_THRESHOLD},
+            backgroundColor: '${BACKGROUND_COLOR}'
+        };
+
+        var ASSETS = ${ASSET_MANIFEST};
+
+        function openStoreUrl() {
+            var url = CONFIG.storeUrl;
+            var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+            if (isIOS && CONFIG.storeUrlIOS) {
+                url = CONFIG.storeUrlIOS;
+            } else if (CONFIG.storeUrlAndroid) {
+                url = CONFIG.storeUrlAndroid;
+            }
+            if (isMRAID && mraid.open) {
+                mraid.open(url);
+            } else {
+                window.open(url, '_blank');
+            }
+        }
+
+        function mraidReady() {
+            if (isMRAID) {
+                if (mraid.getState() === 'loading') {
+                    mraid.addEventListener('ready', function() {
+                        isReady = true;
+                        startGame();
+                    });
+                } else {
+                    isReady = true;
+                    startGame();
+                }
+            } else {
+                isReady = true;
+                startGame();
+            }
+        }
+
+        if (document.readyState === 'complete') {
+            mraidReady();
+        } else {
+            window.addEventListener('load', mraidReady);
+        }
+    </script>
+
+    <!-- Tapper/Idle Game Logic -->
+    <script>
+        var game = null;
+
+        function startGame() {
+            if (game) return;
+
+            var config = {
+                type: Phaser.AUTO,
+                parent: 'game-container',
+                width: ${WIDTH},
+                height: ${HEIGHT},
+                backgroundColor: CONFIG.backgroundColor,
+                scale: {
+                    mode: Phaser.Scale.FIT,
+                    autoCenter: Phaser.Scale.CENTER_BOTH
+                },
+                scene: [BootScene, HookScene, TapperScene, CTAScene]
+            };
+
+            game = new Phaser.Game(config);
+        }
+
+        // =====================================================================
+        // Boot Scene
+        // =====================================================================
+        class BootScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'BootScene' });
+            }
+
+            preload() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+
+                var progressBar = this.add.graphics();
+                var progressBox = this.add.graphics();
+                progressBox.fillStyle(0x222222, 0.8);
+                progressBox.fillRect(width / 4, height / 2 - 15, width / 2, 30);
+
+                this.load.on('progress', function(value) {
+                    progressBar.clear();
+                    progressBar.fillStyle(0x00ff00, 1);
+                    progressBar.fillRect(width / 4 + 5, height / 2 - 10, (width / 2 - 10) * value, 20);
+                });
+
+                this.load.on('complete', function() {
+                    progressBar.destroy();
+                    progressBox.destroy();
+                });
+
+                for (var key in ASSETS) {
+                    if (ASSETS.hasOwnProperty(key)) {
+                        this.load.image(key, ASSETS[key]);
+                    }
+                }
+            }
+
+            create() {
+                this.scene.start('HookScene');
+            }
+        }
+
+        // =====================================================================
+        // Hook Scene
+        // =====================================================================
+        class HookScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'HookScene' });
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Background
+                if (ASSETS.background) {
+                    var bg = this.add.image(width / 2, height / 2, 'background');
+                    this.scaleToFill(bg, width, height);
+                }
+
+                // Main tappable element (big and center)
+                var mainY = height * 0.45;
+                var mainElement;
+
+                if (ASSETS.target) {
+                    mainElement = this.add.image(width / 2, mainY, 'target');
+                    var scale = (width * 0.5) / Math.max(mainElement.width, mainElement.height);
+                    mainElement.setScale(scale);
+                } else {
+                    mainElement = this.add.circle(width / 2, mainY, width * 0.2, 0xf1c40f);
+                }
+
+                // Pulse animation
+                this.tweens.add({
+                    targets: mainElement,
+                    scaleX: mainElement.scaleX * 1.1,
+                    scaleY: mainElement.scaleY * 1.1,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Title
+                var title = this.add.text(width / 2, height * 0.12, CONFIG.gameName, {
+                    fontSize: '28px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 4,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Hook text
+                var hookText = this.add.text(width / 2, height * 0.78, CONFIG.hookText || 'TAP TAP TAP!', {
+                    fontSize: '32px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 4,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Bouncy animation
+                this.tweens.add({
+                    targets: hookText,
+                    y: height * 0.78 - 10,
+                    duration: 300,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Tap finger icon animation
+                var finger = this.add.text(width / 2 + width * 0.15, mainY + 50, '👆', {
+                    fontSize: '40px'
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: finger,
+                    y: mainY,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                // Tap to start
+                this.input.on('pointerdown', function() {
+                    self.scene.start('TapperScene');
+                });
+
+                this.time.delayedCall(CONFIG.hookDuration, function() {
+                    self.scene.start('TapperScene');
+                });
+            }
+
+            scaleToFill(image, width, height) {
+                var scale = Math.max(width / image.width, height / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // Tapper Scene - 15 Second Core Gameplay
+        // =====================================================================
+        class TapperScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'TapperScene' });
+                this.score = 0;
+                this.tapCount = 0;
+                this.multiplier = 1;
+                this.lastTapTime = 0;
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                // Background
+                if (ASSETS.background) {
+                    var bg = this.add.image(width / 2, height / 2, 'background');
+                    this.scaleToFill(bg, width, height);
+                    bg.setAlpha(0.5);
+                }
+
+                // Score display (big!)
+                this.scoreText = this.add.text(width / 2, height * 0.12, '0', {
+                    fontSize: '48px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 4,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Multiplier display
+                this.multiplierText = this.add.text(width / 2, height * 0.22, 'x1', {
+                    fontSize: '24px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 2
+                }).setOrigin(0.5);
+
+                // Main tap target
+                var targetY = height * 0.5;
+                this.targetScale = 1;
+
+                if (ASSETS.target) {
+                    this.target = this.add.image(width / 2, targetY, 'target');
+                    this.targetScale = (width * 0.45) / Math.max(this.target.width, this.target.height);
+                    this.target.setScale(this.targetScale);
+                } else {
+                    this.target = this.add.circle(width / 2, targetY, width * 0.18, 0xf1c40f);
+                    this.targetScale = 1;
+                }
+
+                this.target.setInteractive();
+
+                // Tap handler
+                this.target.on('pointerdown', function(pointer) {
+                    self.handleTap(pointer.x, pointer.y);
+                });
+
+                // Also allow tapping anywhere
+                this.input.on('pointerdown', function(pointer) {
+                    self.handleTap(pointer.x, pointer.y);
+                });
+
+                // Progress bar
+                this.progressBg = this.add.graphics();
+                this.progressBg.fillStyle(0x333333, 0.8);
+                this.progressBg.fillRect(width * 0.1, height - 25, width * 0.8, 10);
+                this.progressBar = this.add.graphics();
+
+                // Bonus items that spawn
+                this.bonusItems = this.add.group();
+
+                // Spawn bonus items periodically
+                this.time.addEvent({
+                    delay: 2000,
+                    callback: this.spawnBonus,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                // Timer
+                var startTime = this.time.now;
+                this.time.addEvent({
+                    delay: 100,
+                    callback: function() {
+                        var elapsed = self.time.now - startTime;
+                        var progress = Math.min(elapsed / CONFIG.gameplayDuration, 1);
+
+                        self.progressBar.clear();
+                        self.progressBar.fillStyle(0x4CAF50, 1);
+                        self.progressBar.fillRect(width * 0.1, height - 25, (width * 0.8) * progress, 10);
+
+                        // Decay multiplier over time if not tapping
+                        if (self.time.now - self.lastTapTime > 500 && self.multiplier > 1) {
+                            self.multiplier = Math.max(1, self.multiplier - 0.1);
+                            self.multiplierText.setText('x' + self.multiplier.toFixed(1));
+                        }
+
+                        if (elapsed >= CONFIG.gameplayDuration) {
+                            self.scene.start('CTAScene', { score: self.score, taps: self.tapCount });
+                        }
+                    },
+                    loop: true
+                });
+
+                // Hint
+                var hint = this.add.text(width / 2, height * 0.82, 'Tap fast for multiplier bonus!', {
+                    fontSize: '16px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    stroke: '#000000',
+                    strokeThickness: 2
+                }).setOrigin(0.5);
+
+                this.time.delayedCall(2500, function() {
+                    self.tweens.add({
+                        targets: hint,
+                        alpha: 0,
+                        duration: 500,
+                        onComplete: function() { hint.destroy(); }
+                    });
+                });
+            }
+
+            handleTap(x, y) {
+                var now = this.time.now;
+                var timeSinceLastTap = now - this.lastTapTime;
+                this.lastTapTime = now;
+
+                // Increase multiplier for fast tapping
+                if (timeSinceLastTap < 300) {
+                    this.multiplier = Math.min(5, this.multiplier + 0.2);
+                }
+
+                var pointsPerTap = CONFIG.pointsPerTap || 1;
+                var points = Math.floor(pointsPerTap * this.multiplier);
+
+                this.score += points;
+                this.tapCount++;
+
+                // Update displays
+                this.scoreText.setText(this.formatNumber(this.score));
+                this.multiplierText.setText('x' + this.multiplier.toFixed(1));
+
+                // Tap effect on target
+                this.tweens.add({
+                    targets: this.target,
+                    scaleX: this.targetScale * 0.9,
+                    scaleY: this.targetScale * 0.9,
+                    duration: 50,
+                    yoyo: true
+                });
+
+                // Score popup
+                var popup = this.add.text(x, y, '+' + points, {
+                    fontSize: '20px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: this.multiplier >= 3 ? '#ff00ff' : (this.multiplier >= 2 ? '#ffff00' : '#ffffff'),
+                    stroke: '#000000',
+                    strokeThickness: 2,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: popup,
+                    y: y - 50,
+                    alpha: 0,
+                    scale: 1.5,
+                    duration: 400,
+                    onComplete: function() { popup.destroy(); }
+                });
+
+                // Particles/effects for high multiplier
+                if (this.multiplier >= 3) {
+                    this.createSparkles(x, y);
+                }
+
+                // Check for bonus threshold
+                if (this.tapCount % (CONFIG.bonusThreshold || 10) === 0) {
+                    this.showBonusMessage();
+                }
+            }
+
+            createSparkles(x, y) {
+                var colors = [0xffff00, 0xff00ff, 0x00ffff, 0xff6600];
+                for (var i = 0; i < 6; i++) {
+                    var angle = (Math.PI * 2 / 6) * i;
+                    var sparkle = this.add.circle(x, y, 5, colors[i % colors.length]);
+
+                    this.tweens.add({
+                        targets: sparkle,
+                        x: x + Math.cos(angle) * 50,
+                        y: y + Math.sin(angle) * 50,
+                        alpha: 0,
+                        scale: 0,
+                        duration: 300,
+                        onComplete: function() { sparkle.destroy(); }
+                    });
+                }
+            }
+
+            showBonusMessage() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+
+                var bonus = this.add.text(width / 2, height * 0.35, 'BONUS!', {
+                    fontSize: '36px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ff00ff',
+                    stroke: '#000000',
+                    strokeThickness: 4,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5).setAlpha(0);
+
+                this.tweens.add({
+                    targets: bonus,
+                    alpha: 1,
+                    scale: 1.3,
+                    duration: 200,
+                    yoyo: true,
+                    hold: 300,
+                    onComplete: function() { bonus.destroy(); }
+                });
+
+                // Add bonus points
+                var bonusPoints = 50 * Math.floor(this.multiplier);
+                this.score += bonusPoints;
+                this.scoreText.setText(this.formatNumber(this.score));
+            }
+
+            spawnBonus() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                var x = Phaser.Math.Between(50, width - 50);
+                var y = Phaser.Math.Between(height * 0.6, height * 0.75);
+
+                var bonus;
+                if (ASSETS.bonus) {
+                    bonus = this.add.image(x, y, 'bonus');
+                    bonus.setScale(0.4);
+                } else {
+                    bonus = this.add.star(x, y, 5, 10, 20, 0xffff00);
+                }
+
+                bonus.setInteractive();
+
+                // Float animation
+                this.tweens.add({
+                    targets: bonus,
+                    y: y - 15,
+                    duration: 400,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                bonus.on('pointerdown', function() {
+                    // Collect bonus
+                    var points = 100;
+                    self.score += points;
+                    self.scoreText.setText(self.formatNumber(self.score));
+
+                    var popup = self.add.text(bonus.x, bonus.y, '+' + points, {
+                        fontSize: '24px',
+                        color: '#ffff00',
+                        stroke: '#000000',
+                        strokeThickness: 3,
+                        fontStyle: 'bold'
+                    }).setOrigin(0.5);
+
+                    self.tweens.add({
+                        targets: popup,
+                        y: popup.y - 40,
+                        alpha: 0,
+                        duration: 400,
+                        onComplete: function() { popup.destroy(); }
+                    });
+
+                    bonus.destroy();
+                });
+
+                // Auto-remove after 3 seconds
+                this.time.delayedCall(3000, function() {
+                    if (bonus.active) {
+                        self.tweens.add({
+                            targets: bonus,
+                            alpha: 0,
+                            scale: 0,
+                            duration: 200,
+                            onComplete: function() { bonus.destroy(); }
+                        });
+                    }
+                });
+            }
+
+            formatNumber(num) {
+                if (num >= 1000000) {
+                    return (num / 1000000).toFixed(1) + 'M';
+                } else if (num >= 1000) {
+                    return (num / 1000).toFixed(1) + 'K';
+                }
+                return num.toString();
+            }
+
+            scaleToFill(image, width, height) {
+                var scale = Math.max(width / image.width, height / image.height);
+                image.setScale(scale);
+            }
+        }
+
+        // =====================================================================
+        // CTA Scene
+        // =====================================================================
+        class CTAScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'CTAScene' });
+            }
+
+            init(data) {
+                this.finalScore = data.score || 0;
+                this.finalTaps = data.taps || 0;
+            }
+
+            create() {
+                var width = this.cameras.main.width;
+                var height = this.cameras.main.height;
+                var self = this;
+
+                this.cameras.main.setBackgroundColor('#1a1a2e');
+
+                var congrats = this.add.text(width / 2, height * 0.12, 'Incredible!', {
+                    fontSize: '28px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // Big score
+                var scoreText = this.add.text(width / 2, height * 0.26, this.formatNumber(this.finalScore), {
+                    fontSize: '48px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffff00',
+                    stroke: '#000000',
+                    strokeThickness: 4,
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: scoreText,
+                    scaleX: 1.1,
+                    scaleY: 1.1,
+                    duration: 500,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                var tapsText = this.add.text(width / 2, height * 0.38, this.finalTaps + ' taps!', {
+                    fontSize: '20px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff'
+                }).setOrigin(0.5);
+
+                var logo = this.add.text(width / 2, height * 0.52, CONFIG.gameName, {
+                    fontSize: '32px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold',
+                    stroke: '#000000',
+                    strokeThickness: 4
+                }).setOrigin(0.5);
+
+                var ctaText = this.add.text(width / 2, height * 0.64, CONFIG.ctaText || 'Keep Tapping!', {
+                    fontSize: '20px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff'
+                }).setOrigin(0.5);
+
+                var buttonWidth = width * 0.7;
+                var buttonHeight = 55;
+                var buttonY = height * 0.8;
+
+                var button = this.add.graphics();
+                button.fillStyle(0x4CAF50, 1);
+                button.fillRoundedRect(
+                    width / 2 - buttonWidth / 2,
+                    buttonY - buttonHeight / 2,
+                    buttonWidth,
+                    buttonHeight,
+                    15
+                );
+
+                var buttonText = this.add.text(width / 2, buttonY, 'INSTALL NOW', {
+                    fontSize: '20px',
+                    fontFamily: 'Arial, sans-serif',
+                    color: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                var hitArea = this.add.rectangle(width / 2, buttonY, buttonWidth, buttonHeight, 0x000000, 0);
+                hitArea.setInteractive({ useHandCursor: true });
+
+                hitArea.on('pointerdown', function() {
+                    openStoreUrl();
+                });
+
+                this.tweens.add({
+                    targets: [button, buttonText, hitArea],
+                    scaleX: 1.05,
+                    scaleY: 1.05,
+                    duration: 600,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                this.input.on('pointerdown', function() {
+                    self.time.delayedCall(50, function() {
+                        openStoreUrl();
+                    });
+                });
+            }
+
+            formatNumber(num) {
+                if (num >= 1000000) {
+                    return (num / 1000000).toFixed(1) + 'M';
+                } else if (num >= 1000) {
+                    return (num / 1000).toFixed(1) + 'K';
+                }
+                return num.toString();
+            }
+        }
+    </script>
+</body>
+</html>
