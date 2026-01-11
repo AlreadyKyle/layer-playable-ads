@@ -362,11 +362,13 @@ class LayerClient:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ):
         settings = get_settings()
         self.api_url = api_url or settings.layer_api_url
         self.api_key = api_key or settings.layer_api_key
         self.workspace_id = workspace_id or settings.layer_workspace_id
+        self.timeout = timeout or 60.0  # Default 60s, but can be overridden
 
         self._client: Optional[httpx.AsyncClient] = None
         self._logger = logger.bind(component="LayerClient")
@@ -377,7 +379,7 @@ class LayerClient:
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=60.0,
+            timeout=self.timeout,
         )
         return self
 
@@ -826,36 +828,38 @@ class LayerClient:
     async def list_styles(
         self,
         limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> list[dict[str, Any]]:
         """
         List styles in the workspace.
 
         Args:
             limit: Maximum number of styles to return
-            offset: Pagination offset
 
         Returns:
-            Tuple of (list of style dicts, total count)
+            List of style dicts with id, name, status, type
         """
-        self._logger.info("Listing styles", limit=limit, offset=offset)
+        self._logger.info("Listing styles", limit=limit)
 
         try:
             data = await self._execute(
                 QUERIES["list_styles"],
                 {
-                    "workspaceId": self.workspace_id,
-                    "limit": limit,
-                    "offset": offset,
+                    "input": {
+                        "workspaceId": self.workspace_id,
+                        "first": limit,
+                    }
                 },
             )
 
-            styles_data = data.get("styles", {})
-            items = styles_data.get("items", [])
-            total = styles_data.get("total", len(items))
+            result = data.get("listStyles", {})
 
-            self._logger.info("Styles listed", count=len(items), total=total)
-            return items, total
+            if result.get("__typename") == "Error":
+                error_msg = result.get("message", "Unknown error")
+                raise LayerAPIError(f"Failed to list styles: {error_msg}")
+
+            styles = result.get("styles", [])
+            self._logger.info("Styles listed", count=len(styles))
+            return styles
 
         except LayerAPIError:
             raise
@@ -891,10 +895,12 @@ class LayerClientSync:
         api_url: Optional[str] = None,
         api_key: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ):
         self._api_url = api_url
         self._api_key = api_key
         self._workspace_id = workspace_id
+        self._timeout = timeout
 
     def _run(self, coro):
         """Run coroutine synchronously."""
@@ -906,6 +912,7 @@ class LayerClientSync:
             api_url=self._api_url,
             api_key=self._api_key,
             workspace_id=self._workspace_id,
+            timeout=self._timeout,
         ) as client:
             method = getattr(client, method_name)
             return await method(*args, **kwargs)
@@ -955,10 +962,9 @@ class LayerClientSync:
     def list_styles(
         self,
         limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[dict[str, Any]], int]:
+    ) -> list[dict[str, Any]]:
         """List workspace styles synchronously."""
-        return self._run(self._execute_method("list_styles", limit, offset))
+        return self._run(self._execute_method("list_styles", limit))
 
     def get_style_dashboard_url(self, style_id: str) -> str:
         """Get dashboard URL for a style."""

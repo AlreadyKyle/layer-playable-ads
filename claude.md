@@ -43,11 +43,15 @@ This document defines constraints, schemas, and repository etiquette for Claude 
 **Stage**: Production-ready MVP
 
 ### MVP v1.0 Features
-- Style-based asset generation with Layer.ai
-- 3-15-5 timing model (Hook-Gameplay-CTA)
+- **3-Step Wizard**: Select Style → Generate Assets → Export Playable
+- Style selection from user's Layer.ai trained styles
+- Asset generation with 3-15-5 timing model (Hook-Gameplay-CTA)
 - Multi-network export (IronSource, Unity, AppLovin, Facebook, Google)
 - MRAID 3.0 compliant HTML5 output
-- Industry-standard ad network specifications
+
+### Architecture Reality
+**IMPORTANT**: Layer.ai requires pre-trained styles. The app cannot create styles from screenshots.
+Users must have trained styles in their Layer.ai workspace before using this app.
 
 ---
 
@@ -417,61 +421,68 @@ MAX_IMAGE_DIMENSION=512
 
 ---
 
-## GraphQL Reference
+## Layer.ai API Reference
 
-### Workspace Credits Query
+**IMPORTANT**: See [docs/layer_api_reference.md](docs/layer_api_reference.md) for complete API documentation.
+
+### Critical Knowledge
+
+1. **Styles are trained ML models** - You cannot generate with just text prompts
+2. **`styleId` is REQUIRED** for `generateImages` mutation
+3. **Only COMPLETE styles work** - Check `status` before using a style
+4. **Status enum values**: `IN_PROGRESS`, `COMPLETE`, `FAILED`, `CANCELLED`, `DELETED`
+
+### Key Queries
 
 ```graphql
-query GetWorkspaceCredits($workspaceId: ID!) {
-    workspace(id: $workspaceId) {
-        credits {
-            available
-            used
-            total
+# List available styles (only use COMPLETE ones)
+query ListStyles($input: ListStylesInput!) {
+    listStyles(input: $input) {
+        __typename
+        ... on StylesResult {
+            styles { id name status type }
         }
+        ... on Error { code message }
+    }
+}
+
+# Poll generation status
+query GetInferencesById($input: GetInferencesByIdInput!) {
+    getInferencesById(input: $input) {
+        __typename
+        ... on InferencesResult {
+            inferences { id status errorCode files { id status url } }
+        }
+        ... on Error { code message }
     }
 }
 ```
 
-### Create Style Mutation
+### Key Mutations
 
 ```graphql
-mutation CreateStyle($input: CreateStyleInput!) {
-    createStyle(input: $input) {
-        id
-        name
-        prefix
-        technical
-        negative
+# Generate images (styleId is REQUIRED)
+mutation GenerateImages($input: GenerateImagesInput!) {
+    generateImages(input: $input) {
+        __typename
+        ... on Inference {
+            id
+            status
+            files { id status url }
+        }
+        ... on Error { type code message }
     }
 }
 ```
 
-### Start Forge Mutation
+### GenerateImagesInput (Correct Structure)
 
-```graphql
-mutation StartForge($input: ForgeInput!) {
-    forge(input: $input) {
-        taskId
-        status
-    }
-}
-```
-
-### Poll Forge Status Query
-
-```graphql
-query GetForgeTaskStatus($taskId: ID!) {
-    forgeTask(id: $taskId) {
-        id
-        status
-        result {
-            imageUrl
-            imageId
-        }
-        error {
-            message
-        }
+```json
+{
+    "input": {
+        "workspaceId": "workspace-id",
+        "styleId": "style-id",       // REQUIRED
+        "prompt": "generation prompt" // At top level, NOT in parameters
     }
 }
 ```
