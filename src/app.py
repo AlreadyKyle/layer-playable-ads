@@ -313,15 +313,40 @@ def render_step_2():
         default_primary = "#FF6B6B"
         default_accent = "#4ECDC4"
 
+    # REQUIRED: Layer.ai Style ID
+    st.markdown("---")
+    st.subheader("⚠️ Layer.ai Style ID (Required)")
     st.write("""
-    Define the visual style for your playable ad assets. This ensures all generated
-    assets have a consistent look and feel.
+    **You must provide a Style ID from your Layer.ai workspace.**
+
+    To get a Style ID:
+    1. Go to [app.layer.ai](https://app.layer.ai)
+    2. Create or select a style in your workspace
+    3. Copy the style ID from the URL (e.g., `abc123-def456-...`)
+    """)
+
+    layer_style_id = st.text_input(
+        "Layer.ai Style ID",
+        value=st.session_state.get("layer_style_id", ""),
+        placeholder="Enter your Layer.ai style ID",
+        help="Required for image generation. Find this in your Layer.ai dashboard URL."
+    )
+
+    if layer_style_id:
+        st.success(f"✓ Style ID set: {layer_style_id[:20]}...")
+        st.session_state.layer_style_id = layer_style_id
+    else:
+        st.warning("⚠️ Style ID is required to generate images")
+
+    st.markdown("---")
+    st.write("""
+    The settings below are for reference/preview only. The actual style comes from Layer.ai.
     """)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("Style Settings")
+        st.subheader("Style Settings (Preview)")
 
         style_name = st.text_input(
             "Style Name",
@@ -523,43 +548,6 @@ def render_step_3():
 
     st.write(f"**Selected**: {len(selected_types)} assets")
 
-    # Quick presets
-    st.markdown("---")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        if st.button("Minimal (4 assets)"):
-            st.session_state.hook_char = True
-            st.session_state.hook_item = False
-            st.session_state.game_bg = True
-            st.session_state.game_collect = True
-            st.session_state.game_elem = False
-            st.session_state.cta_btn = True
-            st.session_state.cta_banner = False
-            st.rerun()
-
-    with col2:
-        if st.button("Standard (6 assets)"):
-            st.session_state.hook_char = True
-            st.session_state.hook_item = True
-            st.session_state.game_bg = True
-            st.session_state.game_collect = True
-            st.session_state.game_elem = False
-            st.session_state.cta_btn = True
-            st.session_state.cta_banner = True
-            st.rerun()
-
-    with col3:
-        if st.button("Full (7 assets)"):
-            st.session_state.hook_char = True
-            st.session_state.hook_item = True
-            st.session_state.game_bg = True
-            st.session_state.game_collect = True
-            st.session_state.game_elem = True
-            st.session_state.cta_btn = True
-            st.session_state.cta_banner = True
-            st.rerun()
-
     # Navigation
     st.markdown("---")
     col1, col2 = st.columns([1, 2])
@@ -570,7 +558,12 @@ def render_step_3():
             st.rerun()
 
     with col2:
-        generate_disabled = len(selected_types) == 0
+        # Check if style_id is set
+        layer_style_id = st.session_state.get("layer_style_id", "")
+        generate_disabled = len(selected_types) == 0 or not layer_style_id
+
+        if not layer_style_id:
+            st.error("⚠️ Layer.ai Style ID required. Go back to Step 2 to enter it.")
 
         if st.button(
             f"⚡ Generate {len(selected_types)} Assets",
@@ -580,6 +573,7 @@ def render_step_3():
             with st.spinner("Generating assets with Layer.ai..."):
                 try:
                     generator = AssetGenerator()
+                    generator.set_style_id(layer_style_id)  # REQUIRED
                     generator.set_style(style)
 
                     progress = st.progress(0)
