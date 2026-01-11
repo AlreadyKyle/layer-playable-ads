@@ -304,8 +304,8 @@ QUERIES = {
     """,
 
     "list_styles": """
-        query GetWorkspaceStyles($input: GetWorkspaceStylesInput!) {
-            getWorkspaceStyles(input: $input) {
+        query ListStyles($input: ListStylesInput!) {
+            listStyles(input: $input) {
                 __typename
                 ... on StylesResponse {
                     styles {
@@ -478,9 +478,16 @@ class LayerClient:
         self._logger.info("Fetching workspace info", workspace_id=self.workspace_id)
 
         try:
+            # GetWorkspaceUsageInput requires workspaceId and filtering fields
+            # filtering is required but can be empty array to get all usage
             data = await self._execute(
                 QUERIES["get_workspace_usage"],
-                {"input": {"workspaceId": self.workspace_id}},
+                {
+                    "input": {
+                        "workspaceId": self.workspace_id,
+                        "filtering": [],
+                    }
+                },
             )
 
             usage_data = data.get("getWorkspaceUsage", {})
@@ -864,20 +871,21 @@ class LayerClient:
         Returns:
             List of style dicts with id, name, status, type
         """
-        self._logger.info("Listing styles", limit=limit)
+        self._logger.info("Listing styles", limit=limit, workspace_id=self.workspace_id)
 
         try:
+            # ListStylesInput uses 'first' for pagination limit
+            # Workspace context comes from auth token, not input
             data = await self._execute(
                 QUERIES["list_styles"],
                 {
                     "input": {
-                        "workspaceId": self.workspace_id,
                         "first": limit,
                     }
                 },
             )
 
-            result = data.get("getWorkspaceStyles", {})
+            result = data.get("listStyles", {})
 
             if result.get("__typename") == "Error":
                 error_msg = result.get("message", "Unknown error")
