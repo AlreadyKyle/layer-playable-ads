@@ -4,54 +4,54 @@ This document defines constraints, schemas, and repository etiquette for Claude 
 
 ---
 
-## IMPORTANT: Task Completion Protocol
+## Quick Reference
 
-**After completing ANY task, ALWAYS provide:**
+### Running the App
+```bash
+# Local development
+streamlit run src/app.py
+# Opens at http://localhost:8501
 
-1. **Test the app link:**
-   ```
-   http://localhost:8501
-   ```
-   Run with: `streamlit run src/app.py`
+# Run tests
+pytest tests/ -v
 
-2. **Git status summary** - What files were changed
+# Test Layer.ai API connection
+python scripts/test_layer_api.py
+```
 
-3. **Next steps for the user** (using GitHub Desktop):
-   - **To commit:** Open GitHub Desktop → Review changes → Write commit message → Click "Commit to main"
-   - **To create PR:** Click "Push origin" → Then "Create Pull Request" → Fill in PR details on GitHub
-   - **To merge:** On GitHub, review PR → Click "Merge pull request" → Delete branch if desired
-
-4. **Quick commands** (if user prefers terminal):
-   ```bash
-   # Check status
-   git status
-
-   # Commit all changes
-   git add -A && git commit -m "Description of changes"
-
-   # Push to remote
-   git push origin main
-   ```
+### Key Files to Know
+| File | Purpose |
+|------|---------|
+| `src/app.py` | Streamlit web UI (4-step wizard) |
+| `src/playable_factory.py` | Unified pipeline orchestrator |
+| `src/layer_client.py` | Layer.ai GraphQL API client |
+| `src/generation/game_asset_generator.py` | Asset generation with retry |
+| `src/templates/registry.py` | Game mechanic templates |
+| `docs/IMPLEMENTATION_PLAN.md` | Current work plan |
 
 ---
 
 ## Project Overview
 
 **Name**: Layer.ai Playable Studio (LPS)
-**Version**: MVP v1.0
-**Purpose**: AI-powered playable ad generation using Layer.ai
-**Stage**: Production-ready MVP
+**Version**: 2.1
+**Purpose**: AI-powered playable ad generation using Layer.ai + Claude Vision
+**Stage**: Active Development
 
-### MVP v1.0 Features
-- **3-Step Wizard**: Select Style → Generate Assets → Export Playable
-- Style selection from user's Layer.ai trained styles
-- Asset generation with 3-15-5 timing model (Hook-Gameplay-CTA)
-- Multi-network export (IronSource, Unity, AppLovin, Facebook, Google)
-- MRAID 3.0 compliant HTML5 output
+### v2.0 Architecture
+- **4-Step Wizard**: Upload Screenshots → Analyze Game → Generate Assets → Export
+- **Claude Vision Analysis**: Automatically detects game mechanic type (match-3, runner, tapper)
+- **Template-Based Games**: Phaser.js templates for each mechanic type
+- **Demo Mode**: Full playable generation without API keys (fallback graphics)
+- **Professional Fallbacks**: Gem-style graphics when Layer.ai assets fail
 
 ### Architecture Reality
-**IMPORTANT**: Layer.ai requires pre-trained styles. The app cannot create styles from screenshots.
-Users must have trained styles in their Layer.ai workspace before using this app.
+**IMPORTANT**: Layer.ai requires pre-trained styles. Generation uses a `styleId` from the user's Layer.ai workspace. If assets fail, the system uses professional-looking fallback graphics.
+
+### Known Issues
+1. **Layer.ai "pixel wizards" error** - Some styles have generation restrictions
+2. **Base model (MODEL_URL) styles** may have content filters
+3. **Solution**: Use custom-trained styles (LAYER_TRAINED_CHECKPOINT)
 
 ---
 
@@ -290,58 +290,59 @@ layer-playable-ads/
 ├── README.md
 ├── requirements.txt
 ├── pyproject.toml
-├── CLAUDE.md             # This file
+├── claude.md             # This file
 │
 ├── docs/                 # Documentation
+│   ├── IMPLEMENTATION_PLAN.md  # Current work plan
+│   ├── architecture.md         # System design
+│   ├── layer_api_reference.md  # API documentation
 │   └── ...
 │
+├── scripts/              # Utility scripts
+│   └── test_layer_api.py      # API diagnostics
+│
 ├── src/
-│   ├── __init__.py       # Package init (v1.0.0)
-│   ├── app.py            # Streamlit 4-step wizard
-│   ├── layer_client.py   # Layer.ai API client + StyleRecipe
+│   ├── app.py                  # Streamlit 4-step wizard
+│   ├── playable_factory.py     # Unified pipeline orchestrator
+│   ├── layer_client.py         # Layer.ai GraphQL client
 │   │
-│   ├── forge/            # Asset generation
-│   │   ├── __init__.py
-│   │   └── asset_forger.py  # AssetGenerator, presets
+│   ├── analysis/               # Claude Vision game analysis
+│   │   └── game_analyzer.py    # Mechanic detection, style extraction
 │   │
-│   ├── playable/         # Playable assembly
-│   │   ├── __init__.py
-│   │   ├── assembler.py  # PlayableAssembler, network exports
-│   │   └── templates/
-│   │       └── phaser_base.html
+│   ├── generation/             # Asset generation
+│   │   ├── game_asset_generator.py  # Layer.ai with retry
+│   │   ├── dynamic_game_generator.py  # (experimental)
+│   │   └── sound_generator.py  # Procedural audio
 │   │
-│   ├── vision/           # AI style extraction
-│   │   ├── __init__.py
-│   │   └── competitor_spy.py  # Claude Vision analysis
+│   ├── assembly/               # Playable HTML5 assembly
+│   │   └── builder.py          # Template injection, optimization
 │   │
-│   ├── workflow/         # Style management
-│   │   ├── __init__.py
-│   │   └── style_manager.py  # Layer.ai style CRUD
+│   ├── templates/              # Game mechanic templates
+│   │   ├── registry.py         # MechanicType enum, registration
+│   │   ├── match3/template.html
+│   │   ├── runner/template.html
+│   │   └── tapper/template.html
 │   │
 │   └── utils/
-│       ├── __init__.py
-│       └── helpers.py
+│       └── helpers.py          # Settings, logging, validation
 │
 └── tests/
-    ├── __init__.py
-    ├── test_layer_client.py
-    ├── test_assembler.py
-    └── test_asset_forger.py
+    ├── test_e2e.py            # End-to-end tests (demo mode)
+    ├── test_layer_client.py   # API client tests
+    └── ...
 ```
 
-### Key Classes (MVP v1.0)
+### Key Classes (v2.0)
 
 | Class | Location | Purpose |
 |-------|----------|---------|
+| `PlayableFactory` | `playable_factory.py` | Main pipeline orchestrator |
 | `LayerClientSync` | `layer_client.py` | Layer.ai API with sync wrapper |
-| `StyleConfig` | `layer_client.py` | Style keywords and negative prompts |
-| `StyleRecipe` | `layer_client.py` | PRD-compliant style schema from vision analysis |
-| `AssetGenerator` | `forge/asset_forger.py` | Generate assets from presets |
-| `AssetType` | `forge/asset_forger.py` | Enum: HOOK_CHARACTER, GAMEPLAY_BACKGROUND, etc. |
-| `PlayableAssembler` | `playable/assembler.py` | Build HTML5 playables |
-| `AdNetwork` | `playable/assembler.py` | Enum: IRONSOURCE, UNITY, APPLOVIN, etc. |
-| `CompetitorSpy` | `vision/competitor_spy.py` | Claude Vision style extraction |
-| `StyleManager` | `workflow/style_manager.py` | Layer.ai style CRUD operations |
+| `GameAnalyzer` | `analysis/game_analyzer.py` | Claude Vision game analysis |
+| `GameAssetGenerator` | `generation/game_asset_generator.py` | Asset generation with retry |
+| `PlayableBuilder` | `assembly/builder.py` | Build HTML5 playables |
+| `MechanicType` | `templates/registry.py` | Enum: MATCH3, RUNNER, TAPPER |
+| `StyleValidation` | `generation/game_asset_generator.py` | Style validation before generation |
 
 ---
 
@@ -549,9 +550,55 @@ When making product decisions, remember competitors:
 
 ---
 
+## Troubleshooting
+
+### Layer.ai Asset Generation Fails
+
+**Error: "Oops! Our pixel wizards need a moment..."**
+
+1. **Check style type**: Run `python scripts/test_layer_api.py`
+   - `MODEL_URL` styles (base models) often have restrictions
+   - Prefer `LAYER_TRAINED_CHECKPOINT` styles
+
+2. **Simplify prompts**: The system auto-retries with simpler prompts
+   - First try: Game-specific prompt from analysis
+   - Retry: Simple generic prompt like "red gemstone"
+
+3. **Check credits**: Ensure workspace has sufficient credits
+
+4. **Use demo mode**: If assets keep failing, the system uses professional fallback graphics
+
+### Playable Doesn't Work
+
+1. **Check browser console**: Open DevTools → Console for JavaScript errors
+2. **Verify Phaser loaded**: Look for `Phaser.Game` in HTML
+3. **Test template**: Run `pytest tests/test_e2e.py -v`
+
+### API Connection Issues
+
+```bash
+# Run diagnostics
+python scripts/test_layer_api.py
+
+# Check environment
+cat .env | grep -E "^(LAYER|ANTHROPIC)"
+```
+
+### Common Fixes
+
+| Issue | Solution |
+|-------|----------|
+| All tiles same color | Fixed in v2.1 - update template |
+| Game stuck on hook | Fixed error handling in Match3Scene |
+| Style not found | Verify style ID and status is COMPLETE |
+| HTTP 403 | Check API key permissions and workspace ID |
+
+---
+
 ## Contact & Resources
 
-- **Layer.ai API Docs**: https://docs.layer.ai
+- **Implementation Plan**: `docs/IMPLEMENTATION_PLAN.md`
+- **Layer.ai API Reference**: `docs/layer_api_reference.md`
 - **Phaser.js Docs**: https://phaser.io/docs
 - **MRAID 3.0 Spec**: https://www.iab.com/guidelines/mraid/
 - **Anthropic Docs**: https://docs.anthropic.com

@@ -787,12 +787,19 @@ class LayerClient:
     # =========================================================================
 
     async def get_image(self, image_id: str) -> dict[str, Any]:
-        """Get image details by ID."""
-        data = await self._execute(
-            QUERIES["get_image"],
-            {"imageId": image_id},
+        """Get image details by ID.
+
+        Note: Layer.ai doesn't have a dedicated getImage query.
+        Images are retrieved as part of inference results.
+        This method fetches the inference containing the image.
+        """
+        self._logger.warning(
+            "get_image is deprecated - images are part of inference results",
+            image_id=image_id
         )
-        return data.get("image", {})
+        # Images don't have a standalone query in Layer.ai
+        # Return empty dict as this method shouldn't be used
+        return {}
 
     async def download_image(self, image_url: str) -> bytes:
         """Download image bytes from URL."""
@@ -852,16 +859,24 @@ class LayerClient:
             style_id: Style ID to retrieve
 
         Returns:
-            Style data dictionary
+            Style data dictionary with id, name, status, type fields
         """
         self._logger.info("Fetching style", style_id=style_id)
 
         try:
             data = await self._execute(
-                QUERIES["get_style"],
-                {"styleId": style_id},
+                QUERIES["get_style_by_id"],
+                {"input": {"styleId": style_id}},
             )
-            return data.get("style", {})
+
+            result = data.get("getStyleById", {})
+
+            # Check for error response
+            if result.get("__typename") == "Error":
+                error_msg = result.get("message", "Unknown error")
+                raise LayerAPIError(f"Failed to get style: {error_msg}")
+
+            return result
         except LayerAPIError:
             raise
         except Exception as e:

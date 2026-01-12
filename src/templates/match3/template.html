@@ -466,6 +466,95 @@ ${PHASER_SCRIPT}
                 return false;
             }
 
+            createFallbackGem(x, y, tileType) {
+                // Professional gem color schemes: [main, light highlight, dark shadow]
+                var gemColors = [
+                    { main: 0xe74c3c, light: 0xf1948a, dark: 0x922b21, name: 'ruby' },      // Red
+                    { main: 0x3498db, light: 0x85c1e9, dark: 0x1a5276, name: 'sapphire' }, // Blue
+                    { main: 0x2ecc71, light: 0x82e0aa, dark: 0x1d8348, name: 'emerald' },  // Green
+                    { main: 0xf1c40f, light: 0xf9e79f, dark: 0xb7950b, name: 'topaz' },    // Yellow
+                    { main: 0x9b59b6, light: 0xd7bde2, dark: 0x6c3483, name: 'amethyst' }, // Purple
+                    { main: 0xe67e22, light: 0xf5cba7, dark: 0xa04000, name: 'citrine' },  // Orange
+                ];
+
+                var gem = gemColors[tileType % gemColors.length];
+                var size = this.tileSize * 0.8;
+                var halfSize = size / 2;
+
+                // Create a container for the gem
+                var container = this.add.container(x, y);
+
+                // Draw gem using graphics
+                var graphics = this.add.graphics();
+
+                // Gem shape - hexagonal crystal
+                var points = [];
+                var sides = 6;
+                for (var i = 0; i < sides; i++) {
+                    var angle = (Math.PI * 2 / sides) * i - Math.PI / 2;
+                    points.push({
+                        x: Math.cos(angle) * halfSize * 0.9,
+                        y: Math.sin(angle) * halfSize * 0.9
+                    });
+                }
+
+                // Draw shadow/base layer
+                graphics.fillStyle(gem.dark, 1);
+                graphics.beginPath();
+                graphics.moveTo(points[0].x + 2, points[0].y + 2);
+                for (var i = 1; i < points.length; i++) {
+                    graphics.lineTo(points[i].x + 2, points[i].y + 2);
+                }
+                graphics.closePath();
+                graphics.fillPath();
+
+                // Draw main gem body
+                graphics.fillStyle(gem.main, 1);
+                graphics.beginPath();
+                graphics.moveTo(points[0].x, points[0].y);
+                for (var i = 1; i < points.length; i++) {
+                    graphics.lineTo(points[i].x, points[i].y);
+                }
+                graphics.closePath();
+                graphics.fillPath();
+
+                // Draw inner facet (lighter)
+                graphics.fillStyle(gem.light, 0.6);
+                graphics.beginPath();
+                var innerScale = 0.5;
+                graphics.moveTo(points[0].x * innerScale - halfSize * 0.15, points[0].y * innerScale - halfSize * 0.15);
+                for (var i = 1; i < 3; i++) {
+                    graphics.lineTo(points[i].x * innerScale - halfSize * 0.15, points[i].y * innerScale - halfSize * 0.15);
+                }
+                graphics.closePath();
+                graphics.fillPath();
+
+                // Draw highlight/shine
+                graphics.fillStyle(0xffffff, 0.7);
+                graphics.fillCircle(-halfSize * 0.25, -halfSize * 0.3, halfSize * 0.15);
+
+                // Small secondary shine
+                graphics.fillStyle(0xffffff, 0.4);
+                graphics.fillCircle(-halfSize * 0.1, -halfSize * 0.15, halfSize * 0.08);
+
+                // Draw outline
+                graphics.lineStyle(2, gem.dark, 0.8);
+                graphics.beginPath();
+                graphics.moveTo(points[0].x, points[0].y);
+                for (var i = 1; i < points.length; i++) {
+                    graphics.lineTo(points[i].x, points[i].y);
+                }
+                graphics.closePath();
+                graphics.strokePath();
+
+                container.add(graphics);
+
+                // Store original scale for highlight reset
+                container.baseScale = 1;
+
+                return container;
+            }
+
             createTileSprite(row, col, tileType) {
                 var x = this.gridOffsetX + col * this.tileSize;
                 var y = this.gridOffsetY + row * this.tileSize;
@@ -473,9 +562,8 @@ ${PHASER_SCRIPT}
 
                 var tile;
                 if (this.useFallbackTiles) {
-                    // Create colored circles as fallback
-                    var colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
-                    tile = this.add.circle(x, y, this.tileSize * 0.4, colors[tileType % colors.length]);
+                    // Create professional-looking gem graphics as fallback
+                    tile = this.createFallbackGem(x, y, tileType);
                 } else {
                     tile = this.add.image(x, y, this.tileKeys[tileType]);
                     var scale = (this.tileSize * 0.85) / Math.max(tile.width, tile.height);
@@ -526,15 +614,20 @@ ${PHASER_SCRIPT}
 
             highlightTile(tile, highlight) {
                 if (highlight) {
+                    var currentScale = this.useFallbackTiles ? (tile.baseScale || 1) : tile.scaleX;
                     this.tweens.add({
                         targets: tile,
-                        scaleX: tile.scaleX * 1.15,
-                        scaleY: tile.scaleY * 1.15,
+                        scaleX: currentScale * 1.15,
+                        scaleY: currentScale * 1.15,
                         duration: 100
                     });
                 } else {
-                    var targetScale = this.useFallbackTiles ? 1 :
-                        (this.tileSize * 0.85) / Math.max(tile.width / tile.scaleX, tile.height / tile.scaleY);
+                    var targetScale;
+                    if (this.useFallbackTiles) {
+                        targetScale = tile.baseScale || 1;
+                    } else {
+                        targetScale = (this.tileSize * 0.85) / Math.max(tile.width / tile.scaleX, tile.height / tile.scaleY);
+                    }
                     this.tweens.add({
                         targets: tile,
                         scaleX: targetScale,
