@@ -168,9 +168,6 @@ class GameAssetGenerator:
         game_prompts = {need.key: need.game_specific_prompt for need in game_needs}
         game_descriptions = {need.key: need.description for need in game_needs}
 
-        # Style prefix for all prompts
-        style_prefix = visual_style.to_prompt_prefix()
-
         for req in template_reqs:
             if not req.required:
                 continue
@@ -183,11 +180,12 @@ class GameAssetGenerator:
             else:
                 base_prompt = req.default_prompt
 
-            # Add style and quality modifiers
+            # Keep prompts simple to avoid content filtering
+            # Layer.ai styles already encode the visual style, so don't overload the prompt
             if req.transparency:
-                prompt = f"{base_prompt}, {style_prefix}, transparent background, game asset, high quality"
+                prompt = f"{base_prompt}, isolated on white background"
             else:
-                prompt = f"{base_prompt}, {style_prefix}, game background, high quality"
+                prompt = base_prompt
 
             result[req.key] = prompt
 
