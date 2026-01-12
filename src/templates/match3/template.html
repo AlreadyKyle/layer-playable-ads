@@ -105,23 +105,38 @@ ${PHASER_SCRIPT}
     <script>
         var game = null;
 
+        // Debug logging (can be disabled in production)
+        var DEBUG = false;
+        function log(msg) {
+            if (DEBUG) console.log('[Match3]', msg);
+        }
+
         function startGame() {
             if (game) return;
 
-            var config = {
-                type: Phaser.AUTO,
-                parent: 'game-container',
-                width: ${WIDTH},
-                height: ${HEIGHT},
-                backgroundColor: CONFIG.backgroundColor,
-                scale: {
-                    mode: Phaser.Scale.FIT,
-                    autoCenter: Phaser.Scale.CENTER_BOTH
-                },
-                scene: [BootScene, HookScene, Match3Scene, CTAScene]
-            };
+            try {
+                log('Starting game...');
+                log('CONFIG: ' + JSON.stringify(CONFIG));
+                log('ASSETS keys: ' + Object.keys(ASSETS).join(', '));
 
-            game = new Phaser.Game(config);
+                var config = {
+                    type: Phaser.AUTO,
+                    parent: 'game-container',
+                    width: ${WIDTH},
+                    height: ${HEIGHT},
+                    backgroundColor: CONFIG.backgroundColor,
+                    scale: {
+                        mode: Phaser.Scale.FIT,
+                        autoCenter: Phaser.Scale.CENTER_BOTH
+                    },
+                    scene: [BootScene, HookScene, Match3Scene, CTAScene]
+                };
+
+                game = new Phaser.Game(config);
+                log('Game created successfully');
+            } catch (e) {
+                console.error('[Match3] Failed to start game:', e);
+            }
         }
 
         // =====================================================================
@@ -175,9 +190,20 @@ ${PHASER_SCRIPT}
             }
 
             create() {
+                log('HookScene create');
                 var width = this.cameras.main.width;
                 var height = this.cameras.main.height;
                 var self = this;
+
+                // Transition function with error handling
+                function goToGame() {
+                    try {
+                        log('Transitioning to Match3Scene');
+                        self.scene.start('Match3Scene');
+                    } catch (e) {
+                        console.error('[Match3] Scene transition failed:', e);
+                    }
+                }
 
                 // Background
                 if (ASSETS.background) {
@@ -251,12 +277,13 @@ ${PHASER_SCRIPT}
 
                 // Tap anywhere to skip
                 this.input.on('pointerdown', function() {
-                    self.scene.start('Match3Scene');
+                    goToGame();
                 });
 
                 // Auto-transition after hook duration
+                log('Setting auto-transition timer: ' + CONFIG.hookDuration + 'ms');
                 this.time.delayedCall(CONFIG.hookDuration, function() {
-                    self.scene.start('Match3Scene');
+                    goToGame();
                 });
             }
 
@@ -283,6 +310,17 @@ ${PHASER_SCRIPT}
             }
 
             create() {
+                log('Match3Scene create');
+                try {
+                    this.initScene();
+                } catch (e) {
+                    console.error('[Match3] Match3Scene create failed:', e);
+                    // Try to transition to CTA on error
+                    this.scene.start('CTAScene', { score: 0 });
+                }
+            }
+
+            initScene() {
                 var width = this.cameras.main.width;
                 var height = this.cameras.main.height;
                 var self = this;
@@ -325,6 +363,7 @@ ${PHASER_SCRIPT}
                 // Fallback if no tile assets
                 if (this.tileKeys.length === 0) {
                     this.tileKeys = ['fallback'];
+                    log('Using fallback tiles');
                     this.useFallbackTiles = true;
                 }
 
@@ -388,6 +427,12 @@ ${PHASER_SCRIPT}
                 this.grid = [];
                 this.tileSprites = [];
 
+                // When using fallback tiles, use CONFIG.tileTypes for variety
+                // Otherwise limit to available tile assets
+                var maxTileType = this.useFallbackTiles
+                    ? CONFIG.tileTypes
+                    : Math.min(this.tileKeys.length, CONFIG.tileTypes);
+
                 for (var row = 0; row < CONFIG.gridHeight; row++) {
                     this.grid[row] = [];
                     this.tileSprites[row] = [];
@@ -396,7 +441,7 @@ ${PHASER_SCRIPT}
                         // Keep generating until we don't have a match
                         var tileType;
                         do {
-                            tileType = Phaser.Math.Between(0, Math.min(this.tileKeys.length, CONFIG.tileTypes) - 1);
+                            tileType = Phaser.Math.Between(0, maxTileType - 1);
                         } while (this.wouldMatch(row, col, tileType));
 
                         this.grid[row][col] = tileType;
