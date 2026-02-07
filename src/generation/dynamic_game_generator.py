@@ -11,8 +11,6 @@ rather than relying on static templates. This allows for:
 from dataclasses import dataclass
 from typing import Optional
 
-import anthropic
-
 from src.analysis.game_analyzer import GameAnalysis
 from src.templates.registry import MechanicType, TEMPLATE_REGISTRY
 
@@ -184,6 +182,7 @@ For SHOOTER:
         model: str = "claude-sonnet-4-20250514",
     ):
         """Initialize the generator."""
+        import anthropic
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
 

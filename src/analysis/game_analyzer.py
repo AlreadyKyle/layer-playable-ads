@@ -15,8 +15,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-import anthropic
-
 from src.templates.registry import MechanicType, TEMPLATE_REGISTRY
 from .models import ConfidenceLevel
 
@@ -181,6 +179,7 @@ Respond in this exact JSON format:
             api_key: Anthropic API key. If None, uses ANTHROPIC_API_KEY env var.
             model: Claude model to use for analysis.
         """
+        import anthropic
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
 
