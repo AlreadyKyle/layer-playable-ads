@@ -105,6 +105,31 @@ LPS supports multiple development workflows to suit different preferences:
 
 ---
 
+## Claude Code Plugins (Installed)
+
+The following plugins are installed and available for Claude Code sessions:
+
+| Plugin | Source | Purpose |
+|--------|--------|---------|
+| **context7** | claude-plugins-official | Fetch up-to-date library docs and code examples via Context7 |
+| **feature-dev** | claude-plugins-official | Guided feature development with codebase understanding and architecture focus |
+| **code-review** | claude-plugins-official | Code review for pull requests |
+| **code-simplifier** | claude-plugins-official | Simplify and refine code for clarity and maintainability |
+| **frontend-design** | claude-plugins-official | Create production-grade frontend interfaces with high design quality |
+| **stripe** | claude-plugins-official | Stripe error explanations, test cards, and integration best practices |
+| **supabase** | claude-plugins-official | Supabase integration support |
+| **linear** | claude-plugins-official | Linear project management integration |
+
+### Plugin Usage
+
+- Use `/feature-dev` for guided feature implementation with architecture planning
+- Use `/code-review` to review pull requests before merging
+- Use Context7 tools (`resolve-library-id` → `query-docs`) to look up current library documentation
+- Use `/frontend-design` when building web UI components
+- Use `/stripe` skills for payment integration guidance
+
+---
+
 ## Git Branch Strategy
 
 - **Main branch:** `main` (default production branch)
