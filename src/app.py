@@ -8,8 +8,16 @@ New Workflow:
 4. Export Playable - Build and download MRAID-compliant HTML5 playable
 """
 
-import base64
+import sys
 from pathlib import Path
+
+# Ensure project root is on sys.path so `from src.xxx` imports work
+# regardless of how the app is launched (streamlit run, start.sh, IDE, etc.)
+_project_root = str(Path(__file__).resolve().parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+import base64
 import tempfile
 from typing import Optional
 
@@ -21,6 +29,12 @@ from src.assembly.builder import PlayableBuilder, PlayableConfig, PlayableResult
 from src.layer_client import LayerClientSync, LayerAPIError, extract_error_message
 from src.templates.registry import MechanicType, TEMPLATE_REGISTRY, list_available_mechanics
 from src.utils.helpers import validate_api_keys, get_settings
+from src.ui_components import (
+    glass_card, step_header, metric_card, confidence_badge, color_palette,
+    asset_preview_card, network_badges, success_banner, empty_state,
+    sidebar_progress, api_status_row, credits_display, phone_preview,
+    gradient_divider, styled_pill, onboarding_card,
+)
 
 
 # =============================================================================
@@ -68,26 +82,105 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; }
-    .step-header {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: #fafafa;
-        margin-bottom: 1rem;
-        padding: 0.5rem 0;
-        border-bottom: 2px solid #ff4b4b;
+    /* ── Design Tokens ── */
+    :root {
+        --bg-primary: #0e1117;
+        --bg-secondary: #161b22;
+        --accent: #FF4B4B;
+        --accent-secondary: #6366f1;
+        --color-success: #48bb78;
+        --color-warning: #ecc94b;
+        --color-error: #f56565;
+        --text-primary: #f0f0f0;
+        --text-secondary: #a0aec0;
+        --text-muted: #636e7b;
+        --glass-bg: rgba(255,255,255,0.03);
+        --glass-border: rgba(255,255,255,0.07);
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
+        --blur: 16px;
+        --shadow-lg: 0 8px 32px rgba(0,0,0,0.25);
+        --transition: 0.25s ease;
     }
-    .mechanic-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-size: 0.9rem;
-        font-weight: 500;
-        margin: 4px;
+
+    /* ── Google Font ── */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    /* ── Global ── */
+    .stApp {
+        background-color: var(--bg-primary);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }
-    .high-confidence { background-color: #276749; color: #9ae6b4; }
-    .medium-confidence { background-color: #744210; color: #fbd38d; }
-    .low-confidence { background-color: #742a2a; color: #feb2b2; }
+    header[data-testid="stHeader"] { background: transparent !important; }
+    footer { display: none !important; }
+    .stApp > header { backdrop-filter: blur(12px); }
+
+    /* ── Sidebar ── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #12151c 0%, #0d1017 100%) !important;
+        border-right: 1px solid var(--glass-border) !important;
+    }
+    section[data-testid="stSidebar"] .stMarkdown p,
+    section[data-testid="stSidebar"] .stMarkdown span {
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* ── Keyframes ── */
+    @keyframes fadeInUp {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+    }
+
+    .animate-fade-in {
+        animation: fadeInUp 0.4s ease both;
+    }
+
+    /* ── Glass Card Hover ── */
+    .glass-card:hover {
+        border-color: rgba(255,255,255,0.12) !important;
+    }
+
+    /* ── Streamlit Button Override ── */
+    .stButton > button {
+        transition: all var(--transition);
+        border-radius: var(--radius-md) !important;
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 600 !important;
+    }
+    .stButton > button:hover {
+        box-shadow: 0 0 20px rgba(255,75,75,0.2);
+        transform: translateY(-1px);
+    }
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, var(--accent), #e03e3e) !important;
+        border: none !important;
+    }
+
+    /* ── Divider Override ── */
+    hr {
+        border-color: var(--glass-border) !important;
+        opacity: 0.5;
+    }
+
+    /* ── Gradient Title ── */
+    .gradient-title {
+        background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-weight: 800;
+        font-size: 2rem;
+        line-height: 1.2;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -118,59 +211,66 @@ def init_session_state():
 
 def render_sidebar():
     """Render sidebar with status and progress."""
-    st.sidebar.title("🎮 Playable Generator")
-    st.sidebar.caption("AI-Powered Game Ad Creation")
+    # Brand mark
+    st.sidebar.markdown("""
+    <div style="padding:8px 0 4px 0;">
+        <span style="
+            font-size:1.6rem;font-weight:800;
+            background:linear-gradient(135deg, #FF4B4B, #6366f1);
+            -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+            background-clip:text;
+        ">LPS</span>
+        <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.1em;
+                     color:#636e7b;margin-top:2px;">Playable Studio</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # API Status
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("API Status")
+    st.sidebar.markdown(gradient_divider(), unsafe_allow_html=True)
+    st.sidebar.markdown('<div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:#636e7b;margin-bottom:8px;">API Status</div>', unsafe_allow_html=True)
 
     key_status = validate_api_keys()
     all_keys_set = all(key_status.values())
 
+    key_labels = {
+        "layer_api_key": "Layer.ai API",
+        "layer_workspace_id": "Workspace ID",
+        "anthropic_api_key": "Anthropic API",
+    }
     for key, is_set in key_status.items():
-        icon = "✅" if is_set else "❌"
-        name = key.replace("_", " ").title()
-        st.sidebar.text(f"{icon} {name}")
+        name = key_labels.get(key, key.replace("_", " ").title())
+        st.sidebar.markdown(api_status_row(name, is_set), unsafe_allow_html=True)
 
     if all_keys_set:
         info = fetch_workspace_info()
         if info and "error" not in info:
             if info.get("has_access") is False:
-                st.sidebar.warning("Could not verify credits — generation blocked for safety")
+                st.sidebar.warning("Could not verify credits")
             else:
-                st.sidebar.metric("Layer.ai Credits", info.get("credits_available", "?"))
+                st.sidebar.markdown(credits_display(info.get("credits_available", "?")), unsafe_allow_html=True)
 
     # Workflow Progress
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Workflow")
-
-    steps = [
-        ("1. Input Game", 1),
-        ("2. Analyze & Review", 2),
-        ("3. Generate Assets", 3),
-        ("4. Export Playable", 4),
-    ]
-
-    for label, step_num in steps:
-        if st.session_state.current_step == step_num:
-            st.sidebar.markdown(f"**→ {label}**")
-        elif st.session_state.current_step > step_num:
-            st.sidebar.markdown(f"✅ {label}")
-        else:
-            st.sidebar.markdown(f"○ {label}")
+    st.sidebar.markdown(gradient_divider(), unsafe_allow_html=True)
+    st.sidebar.markdown('<div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:#636e7b;margin-bottom:8px;">Workflow</div>', unsafe_allow_html=True)
+    st.sidebar.markdown(sidebar_progress(st.session_state.current_step), unsafe_allow_html=True)
 
     # Supported Games
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Supported Game Types")
+    st.sidebar.markdown(gradient_divider(), unsafe_allow_html=True)
+    st.sidebar.markdown('<div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:#636e7b;margin-bottom:8px;">Supported Games</div>', unsafe_allow_html=True)
+
+    pills_html = ""
     for mechanic in list_available_mechanics():
         template = TEMPLATE_REGISTRY[mechanic]
-        st.sidebar.text(f"• {template.name}")
+        pills_html += styled_pill(template.name)
+    st.sidebar.markdown(f'<div style="display:flex;flex-wrap:wrap;gap:4px;">{pills_html}</div>', unsafe_allow_html=True)
 
     # Demo Mode
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Quick Demo")
-    st.sidebar.caption("Test without API keys")
+    st.sidebar.markdown(gradient_divider(), unsafe_allow_html=True)
+    st.sidebar.markdown(glass_card(
+        title="Quick Demo",
+        icon="&#9889;",
+        content='<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px;">No API keys needed</div>',
+    ), unsafe_allow_html=True)
 
     demo_type = st.sidebar.selectbox(
         "Game Type",
@@ -179,7 +279,7 @@ def render_sidebar():
         key="demo_type_select",
     )
 
-    if st.sidebar.button("🎮 Generate Demo", key="demo_btn"):
+    if st.sidebar.button("Generate Demo", type="primary", key="demo_btn"):
         from src.playable_factory import PlayableFactory
         factory = PlayableFactory()
         demo_result = factory.create_demo(
@@ -197,12 +297,19 @@ def render_sidebar():
 
 def render_step_1():
     """Step 1: Input game screenshots."""
-    st.markdown('<p class="step-header">Step 1: Input Your Game</p>', unsafe_allow_html=True)
+    st.markdown(step_header(1, "Input Your Game"), unsafe_allow_html=True)
 
-    st.write("""
-    Upload 1-5 screenshots from the game you want to create a playable ad for.
-    The AI will analyze the game mechanics and visual style.
-    """)
+    # Upload hint card
+    st.markdown(glass_card(
+        icon="&#128247;",
+        title="Upload Screenshots",
+        content="""
+        <div style="font-size:0.88rem;color:var(--text-secondary);line-height:1.6;">
+            Upload 1-5 screenshots from the game you want to create a playable ad for.<br>
+            <span style="color:var(--text-muted);font-size:0.8rem;">Supported: PNG, JPG &middot; Shows core gameplay</span>
+        </div>
+        """,
+    ), unsafe_allow_html=True)
 
     # Screenshot upload
     uploaded_files = st.file_uploader(
@@ -231,7 +338,7 @@ def render_step_1():
         for f in uploaded_files:
             f.seek(0)
 
-        if st.button("🔍 Analyze Game", type="primary"):
+        if st.button("Analyze Game", type="primary"):
             with st.spinner("Analyzing game with Claude Vision..."):
                 try:
                     analyzer = GameAnalyzerSync()
@@ -245,7 +352,11 @@ def render_step_1():
                 except Exception as e:
                     st.error(f"Analysis failed: {str(e)}")
     else:
-        st.info("👆 Upload game screenshots to begin")
+        st.markdown(empty_state(
+            title="Upload Game Screenshots",
+            message="Add 1-5 screenshots showing core gameplay to get started. The AI will analyze mechanics, style, and colors.",
+            icon="&#127918;",
+        ), unsafe_allow_html=True)
 
 
 # =============================================================================
@@ -254,13 +365,13 @@ def render_step_1():
 
 def render_step_2():
     """Step 2: Review and confirm analysis."""
-    st.markdown('<p class="step-header">Step 2: Review Analysis</p>', unsafe_allow_html=True)
+    st.markdown(step_header(2, "Review Analysis"), unsafe_allow_html=True)
 
     analysis: GameAnalysis = st.session_state.game_analysis
 
     if not analysis:
         st.warning("No analysis available. Please go back and upload screenshots.")
-        if st.button("← Back"):
+        if st.button("Back"):
             st.session_state.current_step = 1
             st.rerun()
         return
@@ -269,53 +380,60 @@ def render_step_2():
     col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.subheader(f"🎮 {analysis.game_name}")
-        if analysis.publisher:
-            st.caption(f"by {analysis.publisher}")
+        # Game Identity glass card
+        publisher_html = f'<div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px;">by {analysis.publisher}</div>' if analysis.publisher else ""
+        badge_html = confidence_badge(
+            analysis.mechanic_type.value.upper(),
+            analysis.mechanic_confidence,
+            analysis.confidence_level.value,
+        )
+        reasoning_html = f'<div style="font-size:0.88rem;color:var(--text-secondary);margin-top:10px;"><strong>Why:</strong> {analysis.mechanic_reasoning}</div>'
 
-        # Mechanic type with confidence
-        confidence_class = {
-            "high": "high-confidence",
-            "medium": "medium-confidence",
-            "low": "low-confidence",
-        }.get(analysis.confidence_level.value, "medium-confidence")
-
-        st.markdown(f"""
-        <span class="mechanic-badge {confidence_class}">
-            {analysis.mechanic_type.value.upper()} ({int(analysis.mechanic_confidence * 100)}% confident)
-        </span>
-        """, unsafe_allow_html=True)
-
-        st.write(f"**Why:** {analysis.mechanic_reasoning}")
+        st.markdown(glass_card(
+            title="Game Identity",
+            icon="&#127918;",
+            content=f"""
+            <div style="font-size:1.2rem;font-weight:700;color:var(--text-primary);">{analysis.game_name}</div>
+            {publisher_html}
+            <div style="margin-top:12px;">{badge_html}</div>
+            {reasoning_html}
+            """,
+        ), unsafe_allow_html=True)
 
         # Core loop
-        st.markdown("---")
-        st.subheader("Core Game Loop")
-        st.write(analysis.core_loop_description)
+        st.markdown(glass_card(
+            title="Core Game Loop",
+            icon="&#128260;",
+            content=f'<div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.6;">{analysis.core_loop_description}</div>',
+        ), unsafe_allow_html=True)
 
     with col2:
-        # Visual style
-        st.subheader("Visual Style")
-        st.write(f"**Art:** {analysis.visual_style.art_type}")
-        st.write(f"**Theme:** {analysis.visual_style.theme}")
-        st.write(f"**Mood:** {analysis.visual_style.mood}")
-
-        # Color palette
-        st.write("**Colors:**")
-        color_html = ""
-        for color in analysis.visual_style.color_palette[:6]:
-            color_html += f'<span style="background-color:{color}; padding: 5px 15px; margin: 2px; border-radius: 4px;">&nbsp;</span>'
-        st.markdown(color_html, unsafe_allow_html=True)
+        # Visual Style glass card
+        palette_html = color_palette(analysis.visual_style.color_palette[:6])
+        st.markdown(glass_card(
+            title="Visual Style",
+            icon="&#127912;",
+            content=f"""
+            <div style="font-size:0.88rem;color:var(--text-secondary);line-height:1.8;">
+                <strong>Art:</strong> {analysis.visual_style.art_type}<br>
+                <strong>Theme:</strong> {analysis.visual_style.theme}<br>
+                <strong>Mood:</strong> {analysis.visual_style.mood}
+            </div>
+            <div style="margin-top:12px;">
+                <div style="font-size:0.78rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;">COLOR PALETTE</div>
+                {palette_html}
+            </div>
+            """,
+        ), unsafe_allow_html=True)
 
     # Allow override of mechanic type
-    st.markdown("---")
-    st.subheader("Confirm Game Type")
+    st.markdown(gradient_divider(), unsafe_allow_html=True)
 
     mechanic_options = [m.value for m in list_available_mechanics()]
     current_index = mechanic_options.index(analysis.mechanic_type.value) if analysis.mechanic_type.value in mechanic_options else 0
 
     selected = st.selectbox(
-        "Game Mechanic Type",
+        "Confirm Game Type",
         options=mechanic_options,
         index=current_index,
         format_func=lambda x: TEMPLATE_REGISTRY[MechanicType(x)].name,
@@ -323,37 +441,70 @@ def render_step_2():
 
     st.session_state.selected_mechanic = MechanicType(selected)
 
-    # Show template info
+    # Show template info in glass card with accent
     template = TEMPLATE_REGISTRY[st.session_state.selected_mechanic]
     with st.expander("Template Details"):
-        st.write(f"**Template:** {template.name}")
-        st.write(f"**Description:** {template.description}")
-        st.write(f"**Example Games:** {', '.join(template.example_games)}")
-        st.write("**Required Assets:**")
+        examples = ", ".join(template.example_games)
+        assets_html = ""
         for asset in template.required_assets:
-            st.write(f"  • {asset.key}: {asset.description}")
+            assets_html += f'<div style="font-size:0.85rem;color:var(--text-secondary);padding:3px 0;">&bull; <strong>{asset.key}</strong>: {asset.description}</div>'
+
+        st.markdown(glass_card(
+            content=f"""
+            <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.6;">
+                <strong>Template:</strong> {template.name}<br>
+                <strong>Description:</strong> {template.description}<br>
+                <strong>Example Games:</strong> {examples}
+            </div>
+            <div style="margin-top:12px;">
+                <div style="font-size:0.78rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;">REQUIRED ASSETS</div>
+                {assets_html}
+            </div>
+            """,
+            accent="var(--accent-secondary)",
+        ), unsafe_allow_html=True)
 
     # Assets needed
-    st.markdown("---")
-    st.subheader("Assets to Generate")
+    st.markdown(gradient_divider(), unsafe_allow_html=True)
 
     if analysis.assets_needed:
+        assets_content = ""
         for asset in analysis.assets_needed:
-            st.write(f"• **{asset.key}**: {asset.description}")
+            assets_content += f"""
+            <div style="
+                display:flex;align-items:center;gap:10px;
+                padding:8px 12px;margin:4px 0;
+                background:rgba(255,255,255,0.02);
+                border-radius:var(--radius-sm);
+                border-left:2px solid var(--accent);
+            ">
+                <span style="font-size:0.85rem;color:var(--text-primary);font-weight:600;">{asset.key}</span>
+                <span style="font-size:0.8rem;color:var(--text-muted);">{asset.description}</span>
+            </div>"""
+        st.markdown(glass_card(
+            title="Assets to Generate",
+            icon="&#128444;",
+            content=assets_content,
+        ), unsafe_allow_html=True)
     else:
-        st.info("Using default asset prompts for this template")
+        st.markdown(glass_card(
+            title="Assets to Generate",
+            icon="&#128444;",
+            content='<div style="font-size:0.85rem;color:var(--text-muted);">Using default asset prompts for this template</div>',
+            accent="var(--accent-secondary)",
+        ), unsafe_allow_html=True)
 
     # Navigation
-    st.markdown("---")
+    st.markdown(gradient_divider(), unsafe_allow_html=True)
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        if st.button("← Back to Screenshots"):
+        if st.button("Back to Screenshots"):
             st.session_state.current_step = 1
             st.rerun()
 
     with col2:
-        if st.button("Continue to Asset Generation →", type="primary"):
+        if st.button("Continue to Asset Generation", type="primary"):
             st.session_state.current_step = 3
             st.rerun()
 
@@ -364,14 +515,17 @@ def render_step_2():
 
 def render_step_3():
     """Step 3: Generate assets with Layer.ai."""
-    st.markdown('<p class="step-header">Step 3: Generate Assets</p>', unsafe_allow_html=True)
+    st.markdown(step_header(3, "Generate Assets"), unsafe_allow_html=True)
 
     analysis: GameAnalysis = st.session_state.game_analysis
     mechanic_type = st.session_state.selected_mechanic or analysis.mechanic_type
 
-    # Style selection
-    st.subheader("Select Layer.ai Style")
-    st.write("Choose a trained style from your Layer.ai workspace to generate assets.")
+    # Style selection in glass card
+    st.markdown(glass_card(
+        title="Layer.ai Style",
+        icon="&#127912;",
+        content='<div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px;">Choose a trained style from your workspace to generate assets.</div>',
+    ), unsafe_allow_html=True)
 
     styles_data = fetch_styles(limit=50)
     available_styles = styles_data.get("styles", [])
@@ -400,28 +554,45 @@ def render_step_3():
         else:
             st.warning("No completed styles found")
 
-    # Show what will be generated
-    st.markdown("---")
-    st.subheader("Assets to Generate")
+    # Show what will be generated as styled cards
+    st.markdown(gradient_divider(), unsafe_allow_html=True)
 
     template = TEMPLATE_REGISTRY[mechanic_type]
-    for asset in template.required_assets:
-        if asset.required:
-            st.write(f"• **{asset.key}**: {asset.description}")
+    required_assets = [a for a in template.required_assets if a.required]
+
+    assets_content = ""
+    for asset in required_assets:
+        assets_content += f"""
+        <div style="
+            display:flex;align-items:center;gap:10px;
+            padding:10px 14px;margin:4px 0;
+            background:rgba(255,255,255,0.02);
+            border-radius:var(--radius-sm);
+            border-left:2px solid var(--accent);
+        ">
+            <span style="font-size:0.85rem;color:var(--text-primary);font-weight:600;">{asset.key}</span>
+            <span style="font-size:0.8rem;color:var(--text-muted);">{asset.description}</span>
+        </div>"""
+
+    st.markdown(glass_card(
+        title=f"Assets to Generate ({len(required_assets)})",
+        icon="&#128444;",
+        content=assets_content,
+    ), unsafe_allow_html=True)
 
     # Navigation
-    st.markdown("---")
+    st.markdown(gradient_divider(), unsafe_allow_html=True)
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        if st.button("← Back to Analysis"):
+        if st.button("Back to Analysis"):
             st.session_state.current_step = 2
             st.rerun()
 
     with col2:
         can_generate = st.session_state.layer_style_id is not None
 
-        if st.button("⚡ Generate Assets", type="primary", disabled=not can_generate):
+        if st.button("Generate Assets", type="primary", disabled=not can_generate):
             with st.spinner("Generating assets with Layer.ai..."):
                 try:
                     generator = GameAssetGenerator()
@@ -442,7 +613,10 @@ def render_step_3():
 
                     st.session_state.generated_assets = asset_set
                     st.session_state.current_step = 4
-                    st.success(f"Generated {asset_set.valid_count} assets!")
+                    st.markdown(success_banner(
+                        f"Generated {asset_set.valid_count} assets!",
+                        "Proceeding to export...",
+                    ), unsafe_allow_html=True)
                     st.rerun()
 
                 except LayerAPIError as e:
@@ -457,7 +631,7 @@ def render_step_3():
 
 def render_step_4():
     """Step 4: Export playable ad."""
-    st.markdown('<p class="step-header">Step 4: Export Playable Ad</p>', unsafe_allow_html=True)
+    st.markdown(step_header(4, "Export Playable Ad"), unsafe_allow_html=True)
 
     # Check if we're in demo mode (playable_result exists but no assets)
     is_demo_mode = st.session_state.playable_result is not None and st.session_state.generated_assets is None
@@ -470,7 +644,7 @@ def render_step_4():
         mechanic_type = st.session_state.playable_result.mechanic_type
     elif not assets:
         st.warning("No assets generated. Please go back.")
-        if st.button("← Back"):
+        if st.button("Back"):
             st.session_state.current_step = 3
             st.rerun()
         return
@@ -479,34 +653,59 @@ def render_step_4():
 
     # Asset preview (skip in demo mode)
     if not is_demo_mode and assets:
-        st.subheader("Generated Assets")
+        # Build asset preview cards
+        preview_cards = ""
+        for key, asset in assets.assets.items():
+            preview_cards += asset_preview_card(
+                key=key,
+                image_url=asset.image_url if asset.is_valid else "",
+                is_valid=asset.is_valid,
+                error=asset.error or "",
+            )
+
+        st.markdown(glass_card(
+            title=f"Generated Assets &middot; {assets.total_generation_time:.1f}s",
+            icon="&#128444;",
+            content=f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;">{preview_cards}</div>',
+        ), unsafe_allow_html=True)
+
+        # Still show actual images via Streamlit for clickability
         cols = st.columns(min(len(assets.assets), 5))
         for i, (key, asset) in enumerate(assets.assets.items()):
             with cols[i % len(cols)]:
                 if asset.is_valid and asset.image_url:
                     st.image(asset.image_url, caption=key, width=100)
-                else:
-                    st.write(f"❌ {key}")
-                    if asset.error:
-                        st.caption(asset.error[:50])
 
-        st.caption(f"Generation time: {assets.total_generation_time:.1f}s")
     elif is_demo_mode:
-        st.info("🎮 **Demo Mode** - Using fallback graphics (colored shapes)")
+        st.markdown(glass_card(
+            title="Demo Mode",
+            icon="&#127918;",
+            content='<div style="font-size:0.85rem;color:var(--text-muted);">Using fallback graphics (colored shapes)</div>',
+            accent="var(--accent-secondary)",
+        ), unsafe_allow_html=True)
 
     # Configuration (skip build options in demo mode - already built)
     if not is_demo_mode:
-        st.markdown("---")
-        st.subheader("Playable Settings")
+        st.markdown(gradient_divider(), unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
 
         with col1:
+            st.markdown(glass_card(
+                title="Game Info",
+                icon="&#127918;",
+                content="",
+            ), unsafe_allow_html=True)
             game_name = st.text_input("Game Name", value=analysis.game_name if analysis else "My Game")
             hook_text = st.text_input("Hook Text", value=analysis.hook_suggestion if analysis else "Tap to Play!")
             cta_text = st.text_input("CTA Text", value=analysis.cta_suggestion if analysis else "Download FREE")
 
         with col2:
+            st.markdown(glass_card(
+                title="Technical",
+                icon="&#9881;",
+                content="",
+            ), unsafe_allow_html=True)
             store_url_ios = st.text_input("App Store URL (iOS)", value="https://apps.apple.com/app/id123456789")
             store_url_android = st.text_input("Play Store URL (Android)", value="https://play.google.com/store/apps/details?id=com.example.game")
             bg_color = st.color_picker("Background Color", value="#1a1a2e")
@@ -526,16 +725,16 @@ def render_step_4():
             width, height = 480, 320
 
         # Build button
-        st.markdown("---")
+        st.markdown(gradient_divider(), unsafe_allow_html=True)
         col1, col2 = st.columns([1, 2])
 
         with col1:
-            if st.button("← Back to Assets"):
+            if st.button("Back to Assets"):
                 st.session_state.current_step = 3
                 st.rerun()
 
         with col2:
-            if st.button("🎬 Build Playable", type="primary"):
+            if st.button("Build Playable", type="primary"):
                 with st.spinner("Building playable ad..."):
                     try:
                         config = PlayableConfig(
@@ -555,7 +754,7 @@ def render_step_4():
                         result = builder.build(analysis, assets, config)
 
                         st.session_state.playable_result = result
-                        st.success("Playable built successfully!")
+                        st.markdown(success_banner("Playable built successfully!"), unsafe_allow_html=True)
 
                     except Exception as e:
                         st.error(f"Build failed: {str(e)}")
@@ -564,41 +763,57 @@ def render_step_4():
     if st.session_state.playable_result:
         result: PlayableResult = st.session_state.playable_result
 
-        st.markdown("---")
-        st.subheader("✅ Playable Ready")
+        st.markdown(gradient_divider(), unsafe_allow_html=True)
+        st.markdown(success_banner(
+            "Playable Ready",
+            "Your ad is built and ready for download.",
+        ), unsafe_allow_html=True)
 
-        # Metrics
+        # Metrics as custom cards
+        size_status = "success" if result.file_size_mb <= 5 else "error"
+        valid_status = "success" if result.is_valid else "warning"
+
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("File Size", result.file_size_formatted)
+            st.markdown(metric_card("File Size", result.file_size_formatted, status=size_status), unsafe_allow_html=True)
         with col2:
-            st.metric("Assets", result.assets_embedded)
+            st.markdown(metric_card("Assets", str(result.assets_embedded)), unsafe_allow_html=True)
         with col3:
-            st.metric("Mechanic", result.mechanic_type.value)
+            st.markdown(metric_card("Mechanic", result.mechanic_type.value), unsafe_allow_html=True)
         with col4:
-            status = "✅ Valid" if result.is_valid else "⚠️ Issues"
-            st.metric("Status", status)
+            status_val = "Valid" if result.is_valid else "Issues"
+            st.markdown(metric_card("Status", status_val, status=valid_status), unsafe_allow_html=True)
 
         if result.validation_errors:
             for error in result.validation_errors:
                 st.warning(error)
 
-        # Network compatibility
-        networks = ["Google Ads", "Unity", "IronSource", "AppLovin"]
-        if result.file_size_mb <= 2:
-            networks.append("Facebook")
-
-        st.write("**Compatible Networks:** " + ", ".join(networks))
+        # Network compatibility badges
+        st.markdown(glass_card(
+            title="Network Compatibility",
+            icon="&#127760;",
+            content=network_badges([], file_size_mb=result.file_size_mb),
+        ), unsafe_allow_html=True)
 
         # Downloads
-        st.markdown("---")
-        st.subheader("Download")
+        st.markdown(gradient_divider(), unsafe_allow_html=True)
+
+        st.markdown(glass_card(
+            title="Download",
+            icon="&#128229;",
+            content="""
+            <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px;">
+                Single self-contained HTML file &middot; MRAID 3.0 compliant
+            </div>
+            """,
+            accent="var(--color-success)",
+        ), unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
 
         with col1:
             st.download_button(
-                label="📥 Download index.html",
+                label="Download index.html",
                 data=result.html,
                 file_name="index.html",
                 mime="text/html",
@@ -615,29 +830,21 @@ def render_step_4():
             zip_data = zip_buffer.getvalue()
 
             st.download_button(
-                label="📦 Download ZIP (Google Ads)",
+                label="Download ZIP (Google Ads)",
                 data=zip_data,
                 file_name="playable_ad.zip",
                 mime="application/zip",
             )
 
-        # Preview
-        st.markdown("---")
+        # Preview in phone mockup
+        st.markdown(gradient_divider(), unsafe_allow_html=True)
         if st.checkbox("Show Preview"):
-            st.subheader("Preview")
             b64 = base64.b64encode(result.html.encode()).decode()
-            st.markdown(f"""
-            <iframe
-                src="data:text/html;base64,{b64}"
-                width="340"
-                height="500"
-                style="border: 2px solid #333; border-radius: 8px;"
-            ></iframe>
-            """, unsafe_allow_html=True)
+            st.markdown(phone_preview(b64, width=320, height=480), unsafe_allow_html=True)
 
         # Start over
-        st.markdown("---")
-        if st.button("🔄 Create Another Playable"):
+        st.markdown(gradient_divider(), unsafe_allow_html=True)
+        if st.button("Create Another Playable"):
             for key in ["screenshots", "game_analysis", "selected_mechanic",
                        "layer_style_id", "generated_assets", "playable_result"]:
                 st.session_state[key] = None if key != "screenshots" else []
@@ -654,8 +861,16 @@ def main():
     init_session_state()
     render_sidebar()
 
-    st.title("🎮 Playable Ad Generator")
-    st.caption("Create game-specific playable ads using AI")
+    # Gradient title
+    st.markdown("""
+    <div class="animate-fade-in">
+        <span class="gradient-title">Playable Ad Generator</span>
+        <div style="font-size:0.88rem;color:var(--text-muted);margin-top:4px;">
+            Create game-specific playable ads using AI
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown(gradient_divider(), unsafe_allow_html=True)
 
     # Check if we're in demo mode (step 4 with playable result but no assets)
     is_demo_mode = (
@@ -668,17 +883,7 @@ def main():
     if not is_demo_mode:
         keys = validate_api_keys()
         if not all(keys.values()):
-            st.warning("⚠️ Missing API keys. Use Demo Mode in sidebar to test without keys.")
-            st.markdown("""
-            **Required keys for full workflow:**
-            - `LAYER_API_KEY` - Your Layer.ai API key
-            - `LAYER_WORKSPACE_ID` - Your Layer.ai workspace ID
-            - `ANTHROPIC_API_KEY` - Your Anthropic API key
-
-            Create a `.env` file or add to Streamlit secrets.
-
-            **Or try Demo Mode** in the sidebar to see the playable output without API keys.
-            """)
+            st.markdown(onboarding_card(), unsafe_allow_html=True)
             return
 
     # Render current step
