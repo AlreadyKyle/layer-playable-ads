@@ -1,111 +1,21 @@
 """
-Tests for Asset Forger
+Tests for Game Asset Generator (v2.0)
 
-Basic test coverage for asset generation functionality.
+Test coverage for asset generation functionality using
+the v2.0 API (src.generation.game_asset_generator).
 """
 
 import pytest
 from unittest.mock import Mock, patch
 
-from src.forge.asset_forger import (
-    AssetGenerator,
-    AssetSet,
+from src.generation.game_asset_generator import (
+    GameAssetGenerator,
+    GeneratedAssetSet,
     GeneratedAsset,
-    AssetType,
-    AssetCategory,
-    AssetPreset,
-    ASSET_PRESETS,
 )
+from src.templates.registry import MechanicType, TEMPLATE_REGISTRY, AssetRequirement
 from src.layer_client import StyleConfig
-
-
-# =============================================================================
-# AssetType Tests
-# =============================================================================
-
-
-class TestAssetType:
-    """Tests for AssetType enum."""
-
-    def test_hook_assets(self):
-        """Test hook asset types exist."""
-        assert AssetType.HOOK_CHARACTER is not None
-        assert AssetType.HOOK_ITEM is not None
-        assert AssetType.HOOK_BACKGROUND is not None
-
-    def test_gameplay_assets(self):
-        """Test gameplay asset types exist."""
-        assert AssetType.GAMEPLAY_BACKGROUND is not None
-        assert AssetType.GAMEPLAY_ELEMENT is not None
-        assert AssetType.GAMEPLAY_COLLECTIBLE is not None
-        assert AssetType.GAMEPLAY_OBSTACLE is not None
-
-    def test_cta_assets(self):
-        """Test CTA asset types exist."""
-        assert AssetType.CTA_BUTTON is not None
-        assert AssetType.CTA_BANNER is not None
-        assert AssetType.CTA_ICON is not None
-
-
-# =============================================================================
-# AssetCategory Tests
-# =============================================================================
-
-
-class TestAssetCategory:
-    """Tests for AssetCategory enum."""
-
-    def test_category_values(self):
-        """Test category enum values."""
-        assert AssetCategory.HOOK == "hook"
-        assert AssetCategory.GAMEPLAY == "gameplay"
-        assert AssetCategory.CTA == "cta"
-
-
-# =============================================================================
-# AssetPreset Tests
-# =============================================================================
-
-
-class TestAssetPresets:
-    """Tests for asset presets."""
-
-    def test_all_asset_types_have_presets(self):
-        """Test all AssetType values have corresponding presets."""
-        for asset_type in AssetType:
-            assert asset_type in ASSET_PRESETS, f"Missing preset for {asset_type}"
-
-    def test_preset_has_required_fields(self):
-        """Test presets have all required fields."""
-        for asset_type, preset in ASSET_PRESETS.items():
-            assert isinstance(preset, AssetPreset)
-            assert preset.name is not None
-            assert preset.category is not None
-            assert len(preset.prompts) > 0
-
-    def test_hook_character_preset(self):
-        """Test HOOK_CHARACTER preset details."""
-        preset = ASSET_PRESETS[AssetType.HOOK_CHARACTER]
-
-        assert preset.name == "Character"
-        assert preset.category == AssetCategory.HOOK
-        assert any("character" in p.lower() for p in preset.prompts)
-
-    def test_gameplay_background_preset(self):
-        """Test GAMEPLAY_BACKGROUND preset details."""
-        preset = ASSET_PRESETS[AssetType.GAMEPLAY_BACKGROUND]
-
-        assert preset.name == "Background"
-        assert preset.category == AssetCategory.GAMEPLAY
-        assert any("background" in p.lower() for p in preset.prompts)
-
-    def test_cta_button_preset(self):
-        """Test CTA_BUTTON preset details."""
-        preset = ASSET_PRESETS[AssetType.CTA_BUTTON]
-
-        assert preset.name == "Button"
-        assert preset.category == AssetCategory.CTA
-        assert any("button" in p.lower() for p in preset.prompts)
+from src.analysis.game_analyzer import GameAnalysis, VisualStyle, AssetNeed
 
 
 # =============================================================================
@@ -116,132 +26,244 @@ class TestAssetPresets:
 class TestGeneratedAsset:
     """Tests for GeneratedAsset dataclass."""
 
-    def test_create_generated_asset(self):
-        """Test creating a GeneratedAsset."""
+    def test_create_valid_asset(self):
+        """Test creating a valid GeneratedAsset."""
         asset = GeneratedAsset(
-            asset_type=AssetType.HOOK_CHARACTER,
-            category=AssetCategory.HOOK,
+            key="tile_1",
+            prompt="red candy piece",
             image_url="https://example.com/image.png",
-            image_id="img-123",
-            prompt="test prompt",
+            image_data=b"fake_image_data",
+            base64_data="data:image/png;base64,abc123",
             generation_time=2.5,
+            width=256,
+            height=256,
         )
 
-        assert asset.asset_type == AssetType.HOOK_CHARACTER
-        assert asset.category == AssetCategory.HOOK
+        assert asset.key == "tile_1"
+        assert asset.prompt == "red candy piece"
         assert asset.image_url == "https://example.com/image.png"
         assert asset.generation_time == 2.5
+        assert asset.is_valid is True
+        assert asset.error is None
+
+    def test_create_error_asset(self):
+        """Test creating an asset with an error."""
+        asset = GeneratedAsset(
+            key="tile_1",
+            prompt="red candy piece",
+            image_url=None,
+            image_data=None,
+            base64_data=None,
+            generation_time=0,
+            error="Generation failed",
+        )
+
+        assert asset.is_valid is False
+        assert asset.error == "Generation failed"
 
 
 # =============================================================================
-# AssetSet Tests
+# GeneratedAssetSet Tests
 # =============================================================================
 
 
-class TestAssetSet:
-    """Tests for AssetSet dataclass."""
+class TestGeneratedAssetSet:
+    """Tests for GeneratedAssetSet dataclass."""
 
-    def test_create_empty_asset_set(self):
-        """Test creating an empty AssetSet."""
-        style = StyleConfig(name="Test")
-        asset_set = AssetSet(style=style)
+    def test_create_empty_set(self):
+        """Test creating an empty GeneratedAssetSet."""
+        asset_set = GeneratedAssetSet(
+            game_name="Test Game",
+            mechanic_type=MechanicType.MATCH3,
+            style_id="test-style",
+        )
 
-        assert asset_set.style == style
+        assert asset_set.game_name == "Test Game"
+        assert asset_set.mechanic_type == MechanicType.MATCH3
         assert len(asset_set.assets) == 0
         assert asset_set.total_generation_time == 0.0
+        assert asset_set.valid_count == 0
 
     def test_asset_set_with_assets(self):
-        """Test AssetSet with assets."""
-        style = StyleConfig(name="Test")
-        asset_set = AssetSet(style=style)
+        """Test GeneratedAssetSet with valid and invalid assets."""
+        asset_set = GeneratedAssetSet(
+            game_name="Test Game",
+            mechanic_type=MechanicType.MATCH3,
+            style_id="test-style",
+        )
 
-        asset1 = GeneratedAsset(
-            asset_type=AssetType.HOOK_CHARACTER,
-            category=AssetCategory.HOOK,
+        valid_asset = GeneratedAsset(
+            key="tile_1",
+            prompt="red candy",
             image_url="https://example.com/1.png",
-            prompt="test",
+            image_data=b"data",
+            base64_data="data:image/png;base64,abc",
             generation_time=2.0,
         )
 
-        asset2 = GeneratedAsset(
-            asset_type=AssetType.GAMEPLAY_BACKGROUND,
-            category=AssetCategory.GAMEPLAY,
-            image_url="https://example.com/2.png",
-            prompt="test",
-            generation_time=3.0,
+        error_asset = GeneratedAsset(
+            key="tile_2",
+            prompt="blue candy",
+            image_url=None,
+            image_data=None,
+            base64_data=None,
+            generation_time=0,
+            error="Failed",
         )
 
-        asset_set.assets.append(asset1)
-        asset_set.assets.append(asset2)
-        asset_set.total_generation_time = 5.0
+        asset_set.assets["tile_1"] = valid_asset
+        asset_set.assets["tile_2"] = error_asset
+        asset_set.total_generation_time = 2.0
 
         assert len(asset_set.assets) == 2
-        assert asset_set.total_generation_time == 5.0
+        assert asset_set.valid_count == 1
+        assert asset_set.all_valid is False
 
-    def test_asset_set_get_by_category(self):
-        """Test filtering assets by category."""
-        style = StyleConfig(name="Test")
-        asset_set = AssetSet(style=style)
+    def test_get_asset(self):
+        """Test getting an asset by key."""
+        asset_set = GeneratedAssetSet(
+            game_name="Test",
+            mechanic_type=MechanicType.TAPPER,
+            style_id="test",
+        )
 
-        hook_asset = GeneratedAsset(
-            asset_type=AssetType.HOOK_CHARACTER,
-            category=AssetCategory.HOOK,
+        asset = GeneratedAsset(
+            key="target",
+            prompt="tappable circle",
             image_url="https://example.com/1.png",
-            prompt="test",
-            generation_time=1.0,
+            image_data=b"data",
+            base64_data="data:image/png;base64,abc",
+            generation_time=1.5,
+        )
+        asset_set.assets["target"] = asset
+
+        assert asset_set.get_asset("target") is asset
+        assert asset_set.get_asset("nonexistent") is None
+
+    def test_get_asset_manifest(self):
+        """Test asset manifest generation for template embedding."""
+        asset_set = GeneratedAssetSet(
+            game_name="Test",
+            mechanic_type=MechanicType.MATCH3,
+            style_id="test",
         )
 
-        gameplay_asset = GeneratedAsset(
-            asset_type=AssetType.GAMEPLAY_BACKGROUND,
-            category=AssetCategory.GAMEPLAY,
-            image_url="https://example.com/2.png",
-            prompt="test",
+        valid_asset = GeneratedAsset(
+            key="tile_1",
+            prompt="candy",
+            image_url="https://example.com/1.png",
+            image_data=b"data",
+            base64_data="data:image/png;base64,abc",
             generation_time=1.0,
         )
+        invalid_asset = GeneratedAsset(
+            key="tile_2",
+            prompt="candy",
+            image_url=None,
+            image_data=None,
+            base64_data=None,
+            generation_time=0,
+            error="Failed",
+        )
 
-        asset_set.assets.extend([hook_asset, gameplay_asset])
+        asset_set.assets["tile_1"] = valid_asset
+        asset_set.assets["tile_2"] = invalid_asset
 
-        hook_assets = asset_set.get_by_category(AssetCategory.HOOK)
-        gameplay_assets = asset_set.get_by_category(AssetCategory.GAMEPLAY)
+        manifest = asset_set.get_asset_manifest()
 
-        assert len(hook_assets) == 1
-        assert len(gameplay_assets) == 1
-        assert hook_assets[0].category == AssetCategory.HOOK
+        assert "tile_1" in manifest
+        assert "tile_2" not in manifest
+        assert manifest["tile_1"] == "data:image/png;base64,abc"
 
 
 # =============================================================================
-# AssetGenerator Tests (Mocked)
+# Template Asset Requirements Tests
 # =============================================================================
 
 
-class TestAssetGenerator:
-    """Tests for AssetGenerator class."""
+class TestTemplateAssetRequirements:
+    """Tests for template asset requirements."""
 
-    @pytest.fixture
-    def mock_layer_client(self):
-        """Mock LayerClientSync for tests."""
-        with patch("src.forge.asset_forger.LayerClientSync") as mock:
-            mock_instance = Mock()
-            mock_instance.check_credits.return_value = Mock(credits_available=100)
-            mock.return_value = mock_instance
-            yield mock_instance
+    def test_all_registered_templates_have_assets(self):
+        """Test that all registered templates define required assets."""
+        for mechanic_type, template_info in TEMPLATE_REGISTRY.items():
+            assert len(template_info.required_assets) > 0, (
+                f"Template {mechanic_type.value} has no required assets"
+            )
 
-    def test_generator_initialization(self, mock_layer_client):
-        """Test AssetGenerator initialization."""
-        generator = AssetGenerator()
+    def test_match3_template_requirements(self):
+        """Test Match-3 template has expected asset keys."""
+        template = TEMPLATE_REGISTRY.get(MechanicType.MATCH3)
+        assert template is not None
+
+        asset_keys = {a.key for a in template.required_assets}
+        assert "tile_1" in asset_keys
+        assert "background" in asset_keys
+
+    def test_runner_template_requirements(self):
+        """Test Runner template has expected asset keys."""
+        template = TEMPLATE_REGISTRY.get(MechanicType.RUNNER)
+        assert template is not None
+
+        asset_keys = {a.key for a in template.required_assets}
+        assert "player" in asset_keys
+        assert "background" in asset_keys
+
+    def test_tapper_template_requirements(self):
+        """Test Tapper template has expected asset keys."""
+        template = TEMPLATE_REGISTRY.get(MechanicType.TAPPER)
+        assert template is not None
+
+        asset_keys = {a.key for a in template.required_assets}
+        assert "target" in asset_keys
+        assert "background" in asset_keys
+
+
+# =============================================================================
+# GameAssetGenerator Tests (Mocked)
+# =============================================================================
+
+
+class TestGameAssetGenerator:
+    """Tests for GameAssetGenerator class."""
+
+    def test_generator_initialization(self):
+        """Test GameAssetGenerator initialization with mock client."""
+        mock_client = Mock()
+        generator = GameAssetGenerator(layer_client=mock_client)
+
         assert generator is not None
+        assert generator.client is mock_client
+        assert generator.max_dimension == 512
 
-    def test_set_style(self, mock_layer_client):
-        """Test setting style on generator."""
-        generator = AssetGenerator()
-        style = StyleConfig(
-            name="Test Style",
-            style_keywords=["cartoon", "vibrant"],
-        )
+    def test_generator_custom_dimension(self):
+        """Test GameAssetGenerator with custom max dimension."""
+        mock_client = Mock()
+        generator = GameAssetGenerator(layer_client=mock_client, max_dimension=256)
 
-        generator.set_style(style)
+        assert generator.max_dimension == 256
 
-        assert generator._style == style
+    def test_data_uri_png(self):
+        """Test PNG data URI generation."""
+        mock_client = Mock()
+        generator = GameAssetGenerator(layer_client=mock_client)
+
+        # PNG magic bytes
+        png_data = b'\x89PNG\r\n\x1a\n' + b'\x00' * 100
+        uri = generator._to_data_uri(png_data)
+
+        assert uri.startswith("data:image/png;base64,")
+
+    def test_data_uri_jpeg(self):
+        """Test JPEG data URI generation."""
+        mock_client = Mock()
+        generator = GameAssetGenerator(layer_client=mock_client)
+
+        # JPEG magic bytes
+        jpeg_data = b'\xff\xd8' + b'\x00' * 100
+        uri = generator._to_data_uri(jpeg_data)
+
+        assert uri.startswith("data:image/jpeg;base64,")
 
 
 if __name__ == "__main__":

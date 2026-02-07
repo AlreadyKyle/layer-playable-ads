@@ -154,10 +154,6 @@ var SoundFX = (function() {
 class SoundGenerator:
     """Generates and manages sound effects for playable ads."""
 
-    def __init__(self):
-        """Initialize sound generator."""
-        pass
-
     def get_procedural_sounds_script(self) -> str:
         """Get JavaScript for procedural sound effects.
 

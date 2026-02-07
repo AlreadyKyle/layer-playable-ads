@@ -1,25 +1,25 @@
 """
-Tests for Playable Assembler
+Tests for Playable Builder (v2.0)
 
-Basic test coverage for playable assembly functionality.
+Test coverage for playable assembly functionality using
+the v2.0 builder API (src.assembly.builder).
 """
 
 import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from src.playable.assembler import (
-    PlayableAssembler,
+from src.assembly.builder import (
+    PlayableBuilder,
     PlayableConfig,
-    PlayableMetadata,
-    PlayableAsset,
-    AdNetwork,
-    NETWORK_SPECS,
+    PlayableResult,
     HOOK_DURATION_MS,
     GAMEPLAY_DURATION_MS,
     CTA_DURATION_MS,
-    TOTAL_DURATION_MS,
 )
+from src.templates.registry import MechanicType
+from src.generation.game_asset_generator import GeneratedAssetSet
+from src.analysis.game_analyzer import GameAnalysis, VisualStyle
 
 
 # =============================================================================
@@ -44,8 +44,8 @@ class TestTimingConstants:
 
     def test_total_duration(self):
         """Test total duration is 23 seconds."""
-        assert TOTAL_DURATION_MS == 23000
-        assert TOTAL_DURATION_MS == HOOK_DURATION_MS + GAMEPLAY_DURATION_MS + CTA_DURATION_MS
+        total = HOOK_DURATION_MS + GAMEPLAY_DURATION_MS + CTA_DURATION_MS
+        assert total == 23000
 
 
 # =============================================================================
@@ -64,207 +64,250 @@ class TestPlayableConfig:
         assert config.width == 320
         assert config.height == 480
         assert config.background_color == "#1a1a2e"
+        assert config.game_name == "My Game"
 
     def test_custom_config(self):
         """Test custom PlayableConfig values."""
         config = PlayableConfig(
-            title="My Game",
+            game_name="My Game",
+            title="Test Title",
             width=480,
             height=320,
             background_color="#000000",
-            store_url_ios="https://apps.apple.com/test",
+            store_url="https://example.com",
             hook_text="Play Now!",
             cta_text="Download",
         )
 
-        assert config.title == "My Game"
+        assert config.game_name == "My Game"
+        assert config.title == "Test Title"
         assert config.width == 480
         assert config.height == 320
         assert config.hook_text == "Play Now!"
+        assert config.cta_text == "Download"
+
+    def test_timing_defaults(self):
+        """Test default timing values match constants."""
+        config = PlayableConfig()
+
+        assert config.hook_duration == HOOK_DURATION_MS
+        assert config.gameplay_duration == GAMEPLAY_DURATION_MS
+        assert config.cta_duration == CTA_DURATION_MS
 
 
 # =============================================================================
-# PlayableMetadata Tests
+# PlayableResult Tests
 # =============================================================================
 
 
-class TestPlayableMetadata:
-    """Tests for PlayableMetadata dataclass."""
+class TestPlayableResult:
+    """Tests for PlayableResult dataclass."""
 
-    def test_file_size_formatted_bytes(self):
-        """Test file size formatting for bytes."""
-        metadata = PlayableMetadata(
-            title="Test",
-            file_size_bytes=500,
-            asset_count=1,
-            networks_compatible=["IronSource"],
+    def test_file_size_kb(self):
+        """Test file size in KB."""
+        result = PlayableResult(
+            html="x" * 2048,
+            file_size_bytes=2048,
+            mechanic_type=MechanicType.MATCH3,
+            assets_embedded=0,
+            is_valid=True,
         )
 
-        assert "B" in metadata.file_size_formatted
+        assert result.file_size_kb == 2.0
+
+    def test_file_size_mb(self):
+        """Test file size in MB."""
+        result = PlayableResult(
+            html="x",
+            file_size_bytes=2 * 1024 * 1024,
+            mechanic_type=MechanicType.MATCH3,
+            assets_embedded=0,
+            is_valid=True,
+        )
+
+        assert result.file_size_mb == 2.0
 
     def test_file_size_formatted_kb(self):
         """Test file size formatting for KB."""
-        metadata = PlayableMetadata(
-            title="Test",
+        result = PlayableResult(
+            html="x",
             file_size_bytes=5000,
-            asset_count=1,
-            networks_compatible=["IronSource"],
+            mechanic_type=MechanicType.MATCH3,
+            assets_embedded=0,
+            is_valid=True,
         )
 
-        formatted = metadata.file_size_formatted
-        assert "KB" in formatted
+        assert "KB" in result.file_size_formatted
 
     def test_file_size_formatted_mb(self):
         """Test file size formatting for MB."""
-        metadata = PlayableMetadata(
-            title="Test",
+        result = PlayableResult(
+            html="x",
             file_size_bytes=2_000_000,
-            asset_count=1,
-            networks_compatible=["IronSource"],
+            mechanic_type=MechanicType.MATCH3,
+            assets_embedded=0,
+            is_valid=True,
         )
 
-        formatted = metadata.file_size_formatted
-        assert "MB" in formatted
+        assert "MB" in result.file_size_formatted
 
-    def test_default_duration(self):
-        """Test default duration is 23000ms."""
-        metadata = PlayableMetadata(
-            title="Test",
-            file_size_bytes=1000,
-            asset_count=1,
-            networks_compatible=[],
+    def test_network_compatible(self):
+        """Test network compatibility check."""
+        small = PlayableResult(
+            html="x",
+            file_size_bytes=1_000_000,
+            mechanic_type=MechanicType.MATCH3,
+            assets_embedded=0,
+            is_valid=True,
         )
 
-        assert metadata.duration_ms == 23000
-
-    def test_mraid_version(self):
-        """Test default MRAID version is 3.0."""
-        metadata = PlayableMetadata(
-            title="Test",
-            file_size_bytes=1000,
-            asset_count=1,
-            networks_compatible=[],
+        large = PlayableResult(
+            html="x",
+            file_size_bytes=6_000_000,
+            mechanic_type=MechanicType.MATCH3,
+            assets_embedded=0,
+            is_valid=True,
         )
 
-        assert metadata.mraid_version == "3.0"
+        assert small.is_network_compatible(5.0) is True
+        assert large.is_network_compatible(5.0) is False
 
-
-# =============================================================================
-# AdNetwork Tests
-# =============================================================================
-
-
-class TestAdNetwork:
-    """Tests for AdNetwork enum and specs."""
-
-    def test_network_values(self):
-        """Test all network enum values exist."""
-        assert AdNetwork.IRONSOURCE == "ironsource"
-        assert AdNetwork.UNITY == "unity"
-        assert AdNetwork.APPLOVIN == "applovin"
-        assert AdNetwork.FACEBOOK == "facebook"
-        assert AdNetwork.GOOGLE == "google"
-        assert AdNetwork.MINTEGRAL == "mintegral"
-        assert AdNetwork.VUNGLE == "vungle"
-        assert AdNetwork.TIKTOK == "tiktok"
-        assert AdNetwork.GENERIC == "generic"
-
-    def test_network_specs_exist(self):
-        """Test all networks have specs."""
-        for network in AdNetwork:
-            assert network in NETWORK_SPECS
-
-    def test_ironsource_spec(self):
-        """Test IronSource network spec."""
-        spec = NETWORK_SPECS[AdNetwork.IRONSOURCE]
-
-        assert spec.name == "IronSource"
-        assert spec.max_size_mb == 5.0
-        assert spec.format == "html"
-        assert spec.requires_mraid is True
-
-    def test_facebook_spec(self):
-        """Test Facebook network spec (stricter size limit)."""
-        spec = NETWORK_SPECS[AdNetwork.FACEBOOK]
-
-        assert spec.name == "Facebook"
-        assert spec.max_size_mb == 2.0  # Stricter limit
-        assert spec.format == "html"
-
-    def test_google_spec(self):
-        """Test Google network spec (ZIP format)."""
-        spec = NETWORK_SPECS[AdNetwork.GOOGLE]
-
-        assert spec.name == "Google Ads"
-        assert spec.format == "zip"
-
-
-# =============================================================================
-# PlayableAsset Tests
-# =============================================================================
-
-
-class TestPlayableAsset:
-    """Tests for PlayableAsset dataclass."""
-
-    def test_create_asset(self):
-        """Test creating a PlayableAsset."""
-        asset = PlayableAsset(
-            name="test_asset",
-            data_uri="data:image/png;base64,ABC123",
-            original_size=1000,
-            processed_size=800,
-            width=512,
-            height=512,
+    def test_validation_errors(self):
+        """Test result with validation errors."""
+        result = PlayableResult(
+            html="x",
+            file_size_bytes=100,
+            mechanic_type=MechanicType.MATCH3,
+            assets_embedded=0,
+            is_valid=False,
+            validation_errors=["Missing openStoreUrl"],
         )
 
-        assert asset.name == "test_asset"
-        assert asset.data_uri.startswith("data:image/png;base64,")
-        assert asset.processed_size < asset.original_size
+        assert not result.is_valid
+        assert len(result.validation_errors) == 1
 
 
 # =============================================================================
-# PlayableAssembler Tests
+# PlayableBuilder Tests
 # =============================================================================
 
 
-class TestPlayableAssembler:
-    """Tests for PlayableAssembler class."""
+def _make_analysis(mechanic_type=MechanicType.MATCH3, game_name="Test Game"):
+    """Helper to create a GameAnalysis for testing."""
+    return GameAnalysis(
+        game_name=game_name,
+        publisher="Test",
+        mechanic_type=mechanic_type,
+        mechanic_confidence=1.0,
+        mechanic_reasoning="Test",
+        visual_style=VisualStyle(
+            art_type="cartoon",
+            color_palette=["#FF0000", "#00FF00"],
+            theme="casual",
+            mood="playful",
+        ),
+        assets_needed=[],
+        recommended_template=mechanic_type.value,
+        template_config={},
+        core_loop_description="Test game",
+        hook_suggestion="Play Now!",
+        cta_suggestion="Download!",
+    )
 
-    def test_assembler_initialization(self):
-        """Test PlayableAssembler initialization."""
-        assembler = PlayableAssembler()
-        assert assembler is not None
 
-    def test_validate_for_network_size_check(self):
-        """Test network validation includes size check."""
-        assembler = PlayableAssembler()
+def _make_assets(mechanic_type=MechanicType.MATCH3, game_name="Test Game"):
+    """Helper to create an empty GeneratedAssetSet for testing."""
+    return GeneratedAssetSet(
+        game_name=game_name,
+        mechanic_type=mechanic_type,
+        style_id="test",
+    )
 
-        # Small HTML should pass IronSource (5MB limit)
-        small_html = "<html><body>Test</body></html>"
-        validation = assembler.validate_for_network(small_html, AdNetwork.IRONSOURCE)
 
-        assert "size_ok" in validation
-        assert validation["size_ok"] is True
+class TestPlayableBuilder:
+    """Tests for PlayableBuilder class."""
 
-    def test_validate_for_network_mraid_check(self):
-        """Test network validation includes MRAID check."""
-        assembler = PlayableAssembler()
+    def test_builder_initialization(self):
+        """Test PlayableBuilder initialization."""
+        builder = PlayableBuilder()
+        assert builder is not None
+        assert builder.templates_dir.exists()
 
-        # HTML without MRAID
-        html_no_mraid = "<html><body>Test</body></html>"
-        validation = assembler.validate_for_network(html_no_mraid, AdNetwork.IRONSOURCE)
+    def test_build_produces_html(self):
+        """Test that build produces HTML output."""
+        builder = PlayableBuilder()
+        analysis = _make_analysis()
+        assets = _make_assets()
+        config = PlayableConfig(game_name="Test Game", store_url="https://example.com")
 
-        assert "has_mraid" in validation
+        result = builder.build(analysis, assets, config)
 
-    def test_validate_for_network_store_url_check(self):
-        """Test network validation includes store URL check."""
-        assembler = PlayableAssembler()
+        assert result is not None
+        assert result.file_size_bytes > 0
+        assert "openStoreUrl" in result.html
 
-        html_with_store = "<html><body>https://apps.apple.com/test</body></html>"
-        validation = assembler.validate_for_network(html_with_store, AdNetwork.UNITY)
+    def test_build_substitutes_config(self):
+        """Test that config values are substituted into HTML."""
+        builder = PlayableBuilder()
+        analysis = _make_analysis()
+        assets = _make_assets()
+        config = PlayableConfig(
+            game_name="Test Game",
+            title="My Title",
+            store_url="https://test.example.com",
+            hook_text="Custom Hook",
+            cta_text="Custom CTA",
+            background_color="#123456",
+        )
 
-        assert "has_store_url" in validation
+        result = builder.build(analysis, assets, config)
+
+        assert "My Title" in result.html
+        assert "https://test.example.com" in result.html
+        assert "Custom Hook" in result.html
+        assert "Custom CTA" in result.html
+        assert "#123456" in result.html
+
+    def test_build_no_unsubstituted_placeholders(self):
+        """Test that no ${} placeholders remain after build."""
+        builder = PlayableBuilder()
+        analysis = _make_analysis()
+        assets = _make_assets()
+        config = PlayableConfig(game_name="Test", store_url="https://example.com")
+
+        result = builder.build(analysis, assets, config)
+
+        assert "${" not in result.html, "Unsubstituted placeholders found"
+
+    def test_build_from_template(self):
+        """Test building directly from mechanic type."""
+        builder = PlayableBuilder()
+        assets = _make_assets(mechanic_type=MechanicType.TAPPER)
+        config = PlayableConfig(game_name="Tapper Test", store_url="https://example.com")
+
+        result = builder.build_from_template(
+            mechanic_type=MechanicType.TAPPER,
+            assets=assets,
+            config=config,
+        )
+
+        assert result is not None
+        assert result.mechanic_type == MechanicType.TAPPER
+        assert result.file_size_bytes > 0
+
+    def test_validate_size_limit(self):
+        """Test that oversized playables are flagged."""
+        builder = PlayableBuilder()
+        errors = builder._validate("x" * (6 * 1024 * 1024))  # 6MB
+
+        assert any("exceeds" in e for e in errors)
+
+    def test_validate_missing_store_url(self):
+        """Test validation catches missing openStoreUrl."""
+        builder = PlayableBuilder()
+        errors = builder._validate("<html><body>No store url</body></html>")
+
+        assert any("openStoreUrl" in e for e in errors)
 
 
 if __name__ == "__main__":

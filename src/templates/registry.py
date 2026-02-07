@@ -7,10 +7,13 @@ This module defines:
 - TEMPLATE_REGISTRY mapping mechanics to templates
 """
 
+import structlog
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+
+logger = structlog.get_logger()
 
 
 class MechanicType(str, Enum):
@@ -287,7 +290,13 @@ TEMPLATE_REGISTRY: dict[MechanicType, TemplateInfo] = {
 
 def get_template(mechanic_type: MechanicType) -> Optional[TemplateInfo]:
     """Get template info for a mechanic type."""
-    return TEMPLATE_REGISTRY.get(mechanic_type)
+    template = TEMPLATE_REGISTRY.get(mechanic_type)
+    if template is None and mechanic_type != MechanicType.UNKNOWN:
+        logger.warning(
+            "No template for mechanic type, will fall back to tapper",
+            mechanic_type=mechanic_type.value,
+        )
+    return template
 
 
 def get_template_for_mechanic(mechanic_name: str) -> Optional[TemplateInfo]:

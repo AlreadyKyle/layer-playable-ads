@@ -180,8 +180,8 @@ def _extract_error_message(error: Exception) -> str:
                 exc = error.last_attempt.exception()
                 if exc:
                     error = exc
-        except Exception:
-            pass  # Keep original error if unwrap fails
+        except Exception as unwrap_err:
+            logger.debug("Could not unwrap RetryError", error=str(unwrap_err))
 
     # Handle httpx HTTPStatusError
     if isinstance(error, httpx.HTTPStatusError):
@@ -524,11 +524,15 @@ class LayerClient:
         except LayerAPIError:
             raise
         except Exception as e:
-            self._logger.warning("Failed to get workspace info, using defaults", error=str(e))
+            self._logger.warning(
+                "Failed to get workspace info, blocking operations for safety",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return WorkspaceInfo(
                 workspace_id=self.workspace_id,
-                credits_available=100,  # Assume credits available
-                has_access=True,
+                credits_available=0,
+                has_access=False,
             )
 
     async def check_credits(self) -> WorkspaceInfo:
@@ -787,12 +791,14 @@ class LayerClient:
     # =========================================================================
 
     async def get_image(self, image_id: str) -> dict[str, Any]:
-        """Get image details by ID."""
-        data = await self._execute(
-            QUERIES["get_image"],
-            {"imageId": image_id},
+        """Get image details by ID.
+
+        Note: Not yet implemented - requires Layer.ai image query schema.
+        """
+        raise NotImplementedError(
+            "get_image() requires a 'get_image' query to be defined in QUERIES. "
+            "Add the appropriate Layer.ai GraphQL query before using this method."
         )
-        return data.get("image", {})
 
     async def download_image(self, image_url: str) -> bytes:
         """Download image bytes from URL."""
@@ -858,10 +864,14 @@ class LayerClient:
 
         try:
             data = await self._execute(
-                QUERIES["get_style"],
-                {"styleId": style_id},
+                QUERIES["get_style_by_id"],
+                {"input": {"styleId": style_id}},
             )
-            return data.get("style", {})
+            result = data.get("getStyleById", {})
+            if result.get("__typename") == "Error":
+                error_msg = result.get("message", "Unknown error")
+                raise LayerAPIError(f"Failed to get style: {error_msg}")
+            return result
         except LayerAPIError:
             raise
         except Exception as e:
@@ -925,7 +935,7 @@ class LayerClient:
             Dashboard URL for manual tweaking
         """
         # Extract base URL from API URL
-        base_url = self.api_url.replace("/v1/graphql", "").replace("api.", "")
+        base_url = self.api_url.replace("/v1/graphql", "").replace("/graphql", "").replace("api.", "")
         return f"{base_url}/workspace/{self.workspace_id}/styles/{style_id}"
 
 
@@ -935,7 +945,11 @@ class LayerClient:
 
 
 class LayerClientSync:
-    """Synchronous wrapper for LayerClient (for Streamlit compatibility)."""
+    """Synchronous wrapper for LayerClient (for Streamlit compatibility).
+
+    Uses a persistent event loop and shared async client to avoid
+    creating a new event loop and HTTP connection per API call.
+    """
 
     def __init__(
         self,
@@ -948,29 +962,61 @@ class LayerClientSync:
         self._api_key = api_key
         self._workspace_id = workspace_id
         self._timeout = timeout
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._client: Optional[LayerClient] = None
+
+    def _ensure_loop(self) -> asyncio.AbstractEventLoop:
+        """Get or create a persistent event loop."""
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+        return self._loop
+
+    def _ensure_client(self) -> LayerClient:
+        """Get or create a persistent async client."""
+        if self._client is None:
+            loop = self._ensure_loop()
+            self._client = LayerClient(
+                api_url=self._api_url,
+                api_key=self._api_key,
+                workspace_id=self._workspace_id,
+                timeout=self._timeout,
+            )
+            loop.run_until_complete(self._client.__aenter__())
+        return self._client
 
     def _run(self, coro):
-        """Run coroutine synchronously."""
-        return asyncio.run(coro)
+        """Run coroutine synchronously using the persistent event loop."""
+        return self._ensure_loop().run_until_complete(coro)
 
-    async def _execute_method(self, method_name: str, *args, **kwargs):
-        """Execute async method."""
-        async with LayerClient(
-            api_url=self._api_url,
-            api_key=self._api_key,
-            workspace_id=self._workspace_id,
-            timeout=self._timeout,
-        ) as client:
-            method = getattr(client, method_name)
-            return await method(*args, **kwargs)
+    def close(self):
+        """Close the async client and event loop."""
+        if self._client is not None:
+            try:
+                loop = self._ensure_loop()
+                loop.run_until_complete(self._client.__aexit__(None, None, None))
+            except Exception:
+                pass
+            self._client = None
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.close()
+            self._loop = None
+
+    def __del__(self):
+        """Cleanup on garbage collection."""
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def get_workspace_info(self) -> WorkspaceInfo:
         """Get workspace info synchronously."""
-        return self._run(self._execute_method("get_workspace_info"))
+        client = self._ensure_client()
+        return self._run(client.get_workspace_info())
 
     def check_credits(self) -> WorkspaceInfo:
         """Check credits synchronously."""
-        return self._run(self._execute_method("check_credits"))
+        client = self._ensure_client()
+        return self._run(client.check_credits())
 
     def generate_with_polling(
         self,
@@ -980,19 +1026,15 @@ class LayerClientSync:
         reference_image_id: Optional[str] = None,
     ) -> GeneratedImage:
         """Generate image and wait for completion."""
+        client = self._ensure_client()
         return self._run(
-            self._execute_method(
-                "generate_with_polling",
-                prompt,
-                style_id,
-                style,
-                reference_image_id,
-            )
+            client.generate_with_polling(prompt, style_id, style, reference_image_id)
         )
 
     def download_image(self, image_url: str) -> bytes:
         """Download image bytes."""
-        return self._run(self._execute_method("download_image", image_url))
+        client = self._ensure_client()
+        return self._run(client.download_image(image_url))
 
     # =========================================================================
     # Style Operations (sync wrappers)
@@ -1000,11 +1042,13 @@ class LayerClientSync:
 
     def create_style(self, recipe: "StyleRecipe") -> str:
         """Create a style in Layer.ai synchronously."""
-        return self._run(self._execute_method("create_style", recipe))
+        client = self._ensure_client()
+        return self._run(client.create_style(recipe))
 
     def get_style(self, style_id: str) -> dict[str, Any]:
         """Get style by ID synchronously."""
-        return self._run(self._execute_method("get_style", style_id))
+        client = self._ensure_client()
+        return self._run(client.get_style(style_id))
 
     def list_styles(
         self,
@@ -1012,14 +1056,15 @@ class LayerClientSync:
         status_filter: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
         """List workspace styles synchronously."""
-        return self._run(self._execute_method("list_styles", limit, status_filter))
+        client = self._ensure_client()
+        return self._run(client.list_styles(limit, status_filter))
 
     def get_style_dashboard_url(self, style_id: str) -> str:
         """Get dashboard URL for a style."""
         settings = get_settings()
         api_url = self._api_url or settings.layer_api_url
         workspace_id = self._workspace_id or settings.layer_workspace_id
-        base_url = api_url.replace("/v1/graphql", "").replace("api.", "")
+        base_url = api_url.replace("/v1/graphql", "").replace("/graphql", "").replace("api.", "")
         return f"{base_url}/workspace/{workspace_id}/styles/{style_id}"
 
 

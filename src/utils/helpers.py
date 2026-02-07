@@ -31,9 +31,11 @@ def _load_streamlit_secrets_to_env():
                 # Only set if not already in environment (allow local override)
                 if key.upper() not in os.environ:
                     os.environ[key.upper()] = str(value)
-    except Exception:
-        # Not running in Streamlit context, or secrets not available
-        pass
+    except ImportError:
+        pass  # Not running in Streamlit context
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("Could not load Streamlit secrets: %s", e)
 
 
 # Load Streamlit secrets first (if available)

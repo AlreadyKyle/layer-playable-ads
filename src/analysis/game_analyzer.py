@@ -10,6 +10,7 @@ This module extracts:
 
 import base64
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -231,7 +232,12 @@ Respond in this exact JSON format:
         )
 
         # Parse response
-        response_text = message.content[0].text
+        if not message.content:
+            raise ValueError("Claude returned empty response")
+        first_block = message.content[0]
+        if not hasattr(first_block, "text") or not first_block.text:
+            raise ValueError("Claude response had no text content")
+        response_text = first_block.text
         return self._parse_analysis(response_text)
 
     def analyze_from_files(
@@ -278,14 +284,9 @@ Respond in this exact JSON format:
         """Parse Claude's JSON response into GameAnalysis."""
         # Extract JSON from response (handle markdown code blocks)
         json_str = response_text
-        if "```json" in response_text:
-            start = response_text.find("```json") + 7
-            end = response_text.find("```", start)
-            json_str = response_text[start:end].strip()
-        elif "```" in response_text:
-            start = response_text.find("```") + 3
-            end = response_text.find("```", start)
-            json_str = response_text[start:end].strip()
+        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", response_text)
+        if json_match:
+            json_str = json_match.group(1).strip()
 
         try:
             data = json.loads(json_str)

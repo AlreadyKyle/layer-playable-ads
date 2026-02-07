@@ -136,7 +136,10 @@ def render_sidebar():
     if all_keys_set:
         info = fetch_workspace_info()
         if info and "error" not in info:
-            st.sidebar.metric("Layer.ai Credits", info.get("credits_available", "?"))
+            if info.get("has_access") is False:
+                st.sidebar.warning("Could not verify credits — generation blocked for safety")
+            else:
+                st.sidebar.metric("Layer.ai Credits", info.get("credits_available", "?"))
 
     # Workflow Progress
     st.sidebar.markdown("---")

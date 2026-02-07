@@ -9,7 +9,7 @@ import base64
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 from PIL import Image
@@ -96,7 +96,7 @@ class GameAssetGenerator:
         self,
         analysis: GameAnalysis,
         style_id: str,
-        progress_callback: Optional[callable] = None,
+        progress_callback: Optional[Callable] = None,
     ) -> GeneratedAssetSet:
         """Generate all assets needed for a game's playable ad.
 
@@ -257,7 +257,9 @@ class GameAssetGenerator:
         response.raise_for_status()
 
         # Load with Pillow
-        img = Image.open(BytesIO(response.content))
+        with BytesIO(response.content) as input_buffer:
+            img = Image.open(input_buffer)
+            img.load()  # Force load before closing buffer
 
         # Convert to RGBA if needed (for transparency)
         if img.mode not in ("RGBA", "RGB"):
@@ -272,15 +274,15 @@ class GameAssetGenerator:
             width, height = img.size
 
         # Save optimized
-        buffer = BytesIO()
-        if img.mode == "RGBA":
-            # PNG for transparency
-            img.save(buffer, format="PNG", optimize=True)
-        else:
-            # JPEG for smaller size
-            img.save(buffer, format="JPEG", quality=self.JPEG_QUALITY, optimize=True)
-
-        return buffer.getvalue(), width, height
+        output_buffer = BytesIO()
+        try:
+            if img.mode == "RGBA":
+                img.save(output_buffer, format="PNG", optimize=True)
+            else:
+                img.save(output_buffer, format="JPEG", quality=self.JPEG_QUALITY, optimize=True)
+            return output_buffer.getvalue(), width, height
+        finally:
+            output_buffer.close()
 
     def _to_data_uri(self, image_data: bytes) -> str:
         """Convert image bytes to data URI."""

@@ -12,7 +12,6 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from string import Template
 from typing import Optional
 
 from src.analysis.game_analyzer import GameAnalysis
@@ -133,7 +132,7 @@ class PlayableBuilder:
         if not template_path.exists():
             raise FileNotFoundError(f"Template not found: {template_path}")
 
-        template_html = template_path.read_text()
+        template_html = template_path.read_text(encoding="utf-8")
 
         # Merge config with analysis suggestions
         final_config = self._merge_config(analysis, config)
@@ -178,6 +177,9 @@ class PlayableBuilder:
     ) -> PlayableResult:
         """Build a playable ad directly from a mechanic type.
 
+        This is a convenience wrapper around build() for when you don't
+        have a GameAnalysis object.
+
         Args:
             mechanic_type: The game mechanic type
             assets: GeneratedAssetSet from asset generator
@@ -187,46 +189,29 @@ class PlayableBuilder:
         Returns:
             PlayableResult with assembled HTML
         """
-        # Get template
-        template_info = get_template(mechanic_type)
-        if not template_info:
-            template_info = TEMPLATE_REGISTRY[MechanicType.TAPPER]
+        from src.analysis.game_analyzer import GameAnalysis, VisualStyle
 
-        # Load template HTML
-        template_path = template_info.get_template_path()
-        template_html = template_path.read_text()
-
-        # Merge template config
-        final_template_config = {
-            **template_info.get_default_config(),
-            **(template_config or {}),
-        }
-
-        # Build asset manifest
-        asset_manifest = assets.get_asset_manifest()
-
-        # Prepare substitutions
-        substitutions = self._build_substitutions(
-            config=config,
-            template_config=final_template_config,
-            asset_manifest=asset_manifest,
-        )
-
-        # Perform substitution
-        html = self._substitute_template(template_html, substitutions)
-
-        # Validate
-        errors = self._validate(html)
-        size_bytes = len(html.encode("utf-8"))
-
-        return PlayableResult(
-            html=html,
-            file_size_bytes=size_bytes,
+        # Create a minimal GameAnalysis to delegate to build()
+        analysis = GameAnalysis(
+            game_name=config.game_name,
+            publisher=None,
             mechanic_type=mechanic_type,
-            assets_embedded=len(asset_manifest),
-            is_valid=len(errors) == 0,
-            validation_errors=errors,
+            mechanic_confidence=1.0,
+            mechanic_reasoning="Direct template build",
+            visual_style=VisualStyle(
+                art_type="cartoon",
+                color_palette=["#FF6B6B", "#4ECDC4"],
+                theme="casual",
+                mood="playful",
+            ),
+            assets_needed=[],
+            recommended_template=mechanic_type.value,
+            template_config=template_config or {},
+            core_loop_description="",
+            hook_suggestion=config.hook_text,
+            cta_suggestion=config.cta_text,
         )
+        return self.build(analysis, assets, config)
 
     def _merge_config(
         self,
@@ -301,14 +286,10 @@ class PlayableBuilder:
         return subs
 
     def _substitute_template(self, template_html: str, subs: dict[str, str]) -> str:
-        """Perform template substitution."""
+        """Perform template substitution using ${VAR} style placeholders."""
         result = template_html
-
-        # Use ${VAR} style substitution
         for key, value in subs.items():
-            pattern = r'\$\{' + key + r'\}'
-            result = re.sub(pattern, lambda m: value, result)
-
+            result = result.replace(f"${{{key}}}", value)
         return result
 
     def _validate(self, html: str) -> list[str]:
@@ -324,15 +305,29 @@ class PlayableBuilder:
         if "openStoreUrl" not in html:
             errors.append("Missing openStoreUrl function")
 
-        if "ASSET_MANIFEST" in html or "${" in html:
-            errors.append("Unsubstituted template variables found")
+        # Check for known template placeholders that should have been replaced
+        known_placeholders = [
+            "${TITLE}", "${GAME_NAME}", "${STORE_URL}", "${ASSET_MANIFEST}",
+            "${PHASER_SCRIPT}", "${HOOK_TEXT}", "${CTA_TEXT}", "${BACKGROUND_COLOR}",
+            "${HOOK_DURATION}", "${GAMEPLAY_DURATION}", "${CTA_DURATION}",
+        ]
+        remaining = [p for p in known_placeholders if p in html]
+        if remaining:
+            errors.append(f"Unsubstituted template variables found: {remaining}")
+
+        # Check that asset manifest doesn't contain external URLs (XSS prevention)
+        asset_section = re.search(r"var\s+ASSETS\s*=\s*(\{.*?\});", html, re.DOTALL)
+        if asset_section:
+            asset_json = asset_section.group(1)
+            if re.search(r"https?://", asset_json):
+                errors.append("Asset manifest contains external URLs (expected data URIs only)")
 
         return errors
 
     def export_html(self, result: PlayableResult, output_path: Path) -> None:
         """Export playable to HTML file."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(result.html)
+        output_path.write_text(result.html, encoding="utf-8")
 
     def export_zip(self, result: PlayableResult, output_path: Path) -> None:
         """Export playable as ZIP (for Google Ads)."""
